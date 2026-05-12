@@ -1,10 +1,3 @@
-/**
- * Cliente da API de busca do Mercado Livre.
- * GET https://api.mercadolibre.com/sites/MLB/search
- *
- * REQUER access_token (a partir de 2024 o ML aplica PolicyAgent
- * que retorna 403 em chamadas anônimas).
- */
 import { getAccessToken } from './oauth.js';
 
 const ML_API = 'https://api.mercadolibre.com';
@@ -12,7 +5,6 @@ const SITE_ID = 'MLB';
 
 export async function searchOffers(opts = {}) {
   const params = new URLSearchParams();
-
   if (opts.q) params.set('q', opts.q);
   if (opts.category) params.set('category', opts.category);
   if (opts.freeShipping) params.set('shipping', 'free');
@@ -27,12 +19,10 @@ export async function searchOffers(opts = {}) {
   const res = await fetch(url, {
     headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
   });
-
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`ML search HTTP ${res.status} — ${body.slice(0, 300)}`);
   }
-
   const data = await res.json();
   if (!Array.isArray(data.results)) return [];
   return data.results.map(normalizeProduct);
@@ -44,9 +34,8 @@ function normalizeProduct(p) {
     ? Math.round(((original - p.price) / original) * 100)
     : 0;
   const image = (p.thumbnail || '').replace('-I.jpg', '-O.jpg');
-
   return {
-    id: p.id,
+    productId: p.id,
     title: p.title,
     price: p.price,
     originalPrice: original,
@@ -57,6 +46,5 @@ function normalizeProduct(p) {
     condition: p.condition,
     freeShipping: !!p.shipping?.free_shipping,
     soldQuantity: p.sold_quantity ?? 0,
-    availableQuantity: p.available_quantity ?? null,
   };
 }

@@ -4,3 +4,4 @@ auth_state/
 posted_cache.json
 *.log
 .claude/
+frontend/dist/

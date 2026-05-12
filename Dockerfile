@@ -1,18 +1,35 @@
-FROM node:20-alpine
-
+# ---------- Estágio 1: build do frontend ----------
+FROM node:20-alpine AS frontend-builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --omit=dev || npm install --omit=dev
+RUN npm ci
 
-COPY . .
+COPY vite.config.js ./
+COPY frontend ./frontend
+RUN npm run frontend:build
 
-# auth_state guarda credenciais do WhatsApp e token OAuth do ML.
-# Em produção monte um volume persistente em /app/auth_state.
+# ---------- Estágio 2: produção ----------
+FROM node:20-alpine AS runtime
+WORKDIR /app
+
+# Deps de produção
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+# Código do servidor + schema + frontend buildado
+COPY prisma ./prisma
+COPY src ./src
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+
+# Gera Prisma client
+RUN npx prisma generate
+
 RUN mkdir -p /app/auth_state
 
 ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
-CMD ["node", "src/index.js"]
+# Aplica migrations antes de iniciar
+CMD ["sh", "-c", "npx prisma migrate deploy && node src/server/index.js"]

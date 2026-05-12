@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Cada "workspace" = 1 nicho = 1 número WhatsApp + N grupos
+model Workspace {
+  id           String   @id @default(cuid())
+  name         String
+  niche        String?
+  description  String?
+  searchQuery  String?  @map("search_query")
+  categoryIds  String?  @map("category_ids") // CSV
+  minDiscount  Int      @default(20) @map("min_discount")
+  onlyFreeShipping Boolean @default(true) @map("only_free_shipping")
+  onlyDeals    Boolean  @default(true) @map("only_deals")
+  maxPerRun    Int      @default(3) @map("max_per_run")
+  intervalMin  Int      @default(60) @map("interval_min") // a cada quantos min buscar
+  autoSearch   Boolean  @default(false) @map("auto_search")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  whatsappSession WhatsappSession?
+  groups          Group[]
+  offers          Offer[]
+
+  @@map("workspaces")
+}
+
+model WhatsappSession {
+  id          String   @id @default(cuid())
+  workspaceId String   @unique @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  phoneNumber String?  @map("phone_number")
+  status      String   @default("disconnected") // disconnected, qr, connecting, connected
+  lastQrAt    DateTime? @map("last_qr_at")
+  connectedAt DateTime? @map("connected_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("whatsapp_sessions")
+}
+
+// Grupos de WhatsApp em cada workspace.
+// type: "staging" (revisão sua) ou "publish" (público — informativo, posts são manuais)
+model Group {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  jid         String   // formato: 123@g.us
+  name        String
+  type        String   @default("staging") // staging | publish
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([workspaceId, jid])
+  @@map("groups")
+}
+
+// Ofertas processadas (busca + filtro). Status define posição no funil.
+model Offer {
+  id            String   @id @default(cuid())
+  workspaceId   String   @map("workspace_id")
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  productId     String   @map("product_id")
+  title         String
+  price         Float
+  originalPrice Float?   @map("original_price")
+  discountPercent Int    @default(0) @map("discount_percent")
+  currency      String   @default("BRL")
+  permalink     String
+  affiliateUrl  String   @map("affiliate_url")
+  imageUrl      String   @map("image_url")
+  freeShipping  Boolean  @default(false) @map("free_shipping")
+  condition     String?
+  soldQuantity  Int      @default(0) @map("sold_quantity")
+  status        String   @default("pending") // pending | sent | rejected | duplicate
+  sentAt        DateTime? @map("sent_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([workspaceId, productId])
+  @@index([workspaceId, status])
+  @@map("offers")
+}
+
+// Token OAuth do Mercado Livre. Único por conta (você).
+model MlToken {
+  id           Int      @id @default(1)
+  accessToken  String   @map("access_token")
+  refreshToken String   @map("refresh_token")
+  obtainedAt   DateTime @map("obtained_at")
+  expiresIn    Int      @map("expires_in")
+  userId       String?  @map("user_id")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("ml_tokens")
+}
+
+// Sessão de auth do dashboard (cookie token → user)
+model AuthSession {
+  token     String   @id
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+
+  @@map("auth_sessions")
+}
