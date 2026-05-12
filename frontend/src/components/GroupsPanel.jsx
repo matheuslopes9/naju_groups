@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { Icon } from './Icon.jsx';
 
 export default function GroupsPanel({ ws }) {
   const [registered, setRegistered] = useState([]);
@@ -8,81 +9,106 @@ export default function GroupsPanel({ ws }) {
   const [loading, setLoading] = useState(true);
 
   async function load() {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
       const [regs, avs] = await Promise.all([
         api.listGroups(ws.id),
         api.waListGroups(ws.id).catch((e) => { setError(e.message); return []; }),
       ]);
-      setRegistered(regs);
-      setAvailable(avs);
-    } finally {
-      setLoading(false);
-    }
+      setRegistered(regs); setAvailable(avs);
+    } finally { setLoading(false); }
   }
-
   useEffect(() => { load(); }, [ws.id]);
 
-  async function addGroup(jid, name, type) {
-    await api.addGroup(ws.id, { jid, name, type });
+  async function addGroup(jid, name) {
+    await api.addGroup(ws.id, { jid, name, type: 'staging' });
     load();
   }
   async function removeGroup(gid) {
-    await api.deleteGroup(ws.id, gid);
-    load();
+    await api.deleteGroup(ws.id, gid); load();
   }
 
   const registeredJids = new Set(registered.map((g) => g.jid));
 
   return (
-    <div className="space-y-6">
-      <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-        <h3 className="font-semibold mb-3">Grupos cadastrados (staging = revisão sua)</h3>
+    <div className="space-y-5">
+      <div className="card">
+        <h3 className="font-semibold mb-1 flex items-center gap-2">
+          <Icon.Users /> Grupos cadastrados
+        </h3>
+        <p className="text-xs mb-4" style={{ color: 'rgb(var(--text-muted))' }}>
+          Tipo <strong>staging</strong>: ofertas aprovadas são enviadas aqui pra você revisar antes do grupo público
+        </p>
         {registered.length === 0 ? (
-          <p className="text-sm text-slate-400">Nenhum grupo cadastrado. Cadastre algum da lista abaixo.</p>
+          <div className="text-center py-6 text-sm" style={{ color: 'rgb(var(--text-muted))' }}>
+            Nenhum grupo cadastrado ainda
+          </div>
         ) : (
           <ul className="space-y-2">
             {registered.map((g) => (
-              <li key={g.id} className="flex items-center justify-between bg-slate-900 rounded-lg px-3 py-2">
-                <div>
-                  <span className="font-medium">{g.name}</span>
-                  <span className="ml-2 text-xs text-slate-400">{g.type}</span>
+              <li key={g.id} className="flex items-center justify-between gap-3 p-3 rounded-lg"
+                  style={{ background: 'rgba(var(--bg-elevated), 0.6)' }}>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-sm truncate">{g.name}</div>
+                  <div className="text-xs mt-0.5" style={{ color: 'rgb(var(--text-muted))' }}>
+                    <span className="badge badge-muted !text-[10px] !px-1.5 !py-0">{g.type}</span>
+                  </div>
                 </div>
-                <button onClick={() => removeGroup(g.id)} className="text-xs text-rose-400 hover:text-rose-300">remover</button>
+                <button onClick={() => removeGroup(g.id)} className="btn btn-ghost !p-1.5 !text-rose-400 hover:!bg-rose-500/10">
+                  <Icon.Trash width={14} height={14} />
+                </button>
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-        <h3 className="font-semibold mb-3">Grupos disponíveis no WhatsApp deste workspace</h3>
-        {error && <p className="text-sm text-rose-400 mb-3">{error}</p>}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold flex items-center gap-2">
+            <Icon.Sparkles className="text-gradient" /> Grupos disponíveis
+          </h3>
+          <button onClick={load} className="btn btn-ghost !p-1.5" title="Atualizar">
+            <Icon.RefreshCw width={14} height={14} />
+          </button>
+        </div>
+        {error && (
+          <div className="text-sm px-3 py-2 rounded-lg mb-3"
+               style={{ background: 'rgba(244,63,94,0.1)', color: 'rgb(var(--danger))' }}>
+            {error}
+          </div>
+        )}
         {loading ? (
-          <p className="text-sm text-slate-400">Carregando grupos…</p>
+          <p className="text-sm" style={{ color: 'rgb(var(--text-muted))' }}>Carregando…</p>
         ) : available.length === 0 ? (
-          <p className="text-sm text-slate-400">Nenhum grupo encontrado. Adicione o bot a algum grupo no WhatsApp.</p>
+          <p className="text-sm" style={{ color: 'rgb(var(--text-muted))' }}>
+            Nenhum grupo. Adicione o bot a algum grupo no WhatsApp e atualize.
+          </p>
         ) : (
           <ul className="space-y-2">
-            {available.map((g) => (
-              <li key={g.jid} className="flex items-center justify-between bg-slate-900 rounded-lg px-3 py-2">
-                <div>
-                  <div className="font-medium">{g.name}</div>
-                  <div className="text-xs text-slate-500">{g.participantsCount} membros · {g.jid}</div>
-                </div>
-                {registeredJids.has(g.jid) ? (
-                  <span className="text-xs text-emerald-400">cadastrado</span>
-                ) : (
-                  <button
-                    onClick={() => addGroup(g.jid, g.name, 'staging')}
-                    className="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500"
-                  >
-                    + cadastrar (staging)
-                  </button>
-                )}
-              </li>
-            ))}
+            {available.map((g) => {
+              const isReg = registeredJids.has(g.jid);
+              return (
+                <li key={g.jid} className="flex items-center justify-between gap-3 p-3 rounded-lg"
+                    style={{ background: 'rgba(var(--bg-elevated), 0.6)' }}>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-sm truncate">{g.name}</div>
+                    <div className="text-xs mt-0.5" style={{ color: 'rgb(var(--text-muted))' }}>
+                      {g.participantsCount} membros
+                    </div>
+                  </div>
+                  {isReg ? (
+                    <span className="badge badge-success">
+                      <Icon.Check width={12} height={12} /> cadastrado
+                    </span>
+                  ) : (
+                    <button onClick={() => addGroup(g.jid, g.name)} className="btn btn-primary !text-xs !py-1">
+                      <Icon.Plus width={12} height={12} /> cadastrar
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

@@ -12,6 +12,7 @@ import { startWorker } from './worker.js';
 import authRouter from './routes/auth.js';
 import workspacesRouter from './routes/workspaces.js';
 import mlRouter from './routes/ml.js';
+import auditRouter from './routes/audit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIST = path.resolve(__dirname, '../../frontend/dist');
@@ -30,6 +31,7 @@ app.use('/api/ml', authMiddleware, mlRouter);
 
 // API protegida
 app.use('/api/workspaces', authMiddleware, workspacesRouter);
+app.use('/api/audit', authMiddleware, auditRouter);
 
 // Servir frontend build (em produção). Em dev rode `npm run frontend:dev` separado.
 if (fs.existsSync(FRONTEND_DIST)) {

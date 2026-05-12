@@ -23,6 +23,10 @@ export const api = {
   login: (password) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
 
+  // Stats / audit
+  stats: () => request('/api/workspaces/stats'),
+  audit: (workspaceId) => request(`/api/audit${workspaceId ? `?workspaceId=${workspaceId}` : ''}`),
+
   // ML
   mlStatus: () => request('/api/ml/status'),
 

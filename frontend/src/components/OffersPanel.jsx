@@ -1,79 +1,105 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { Icon } from './Icon.jsx';
+
+const TABS = [
+  { id: 'pending',  label: 'Pendentes', icon: Icon.Sparkles, tone: 'badge-warning' },
+  { id: 'sent',     label: 'Enviadas',  icon: Icon.Check,    tone: 'badge-success' },
+  { id: 'rejected', label: 'Rejeitadas', icon: Icon.X,       tone: 'badge-muted' },
+];
 
 export default function OffersPanel({ ws }) {
   const [tab, setTab] = useState('pending');
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [toast, setToast] = useState(null);
 
   async function load() {
     setLoading(true);
     try { setOffers(await api.listOffers(ws.id, tab)); }
     finally { setLoading(false); }
   }
-
   useEffect(() => { load(); }, [ws.id, tab]);
 
   async function searchNow() {
     setSearching(true);
     try {
       const r = await api.searchNow(ws.id);
-      alert(`${r.saved} novas ofertas salvas`);
+      setToast({ msg: `${r.saved} nova(s) oferta(s) salva(s)`, tone: 'success' });
+      setTimeout(() => setToast(null), 3000);
       load();
     } catch (e) {
-      alert(e.message);
-    } finally {
-      setSearching(false);
-    }
+      setToast({ msg: e.message, tone: 'danger' });
+      setTimeout(() => setToast(null), 5000);
+    } finally { setSearching(false); }
   }
 
   async function approve(oid) {
-    try {
-      await api.approveOffer(ws.id, oid);
-      load();
-    } catch (e) { alert(e.message); }
+    try { await api.approveOffer(ws.id, oid); load(); }
+    catch (e) { alert(e.message); }
   }
   async function reject(oid) {
-    await api.rejectOffer(ws.id, oid);
-    load();
+    await api.rejectOffer(ws.id, oid); load();
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2 bg-slate-800 rounded-lg p-1">
-          {['pending', 'sent', 'rejected'].map((s) => (
-            <button
-              key={s}
-              onClick={() => setTab(s)}
-              className={`px-3 py-1.5 rounded text-sm ${
-                tab === s ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {s === 'pending' ? 'Pendentes' : s === 'sent' ? 'Enviadas' : 'Rejeitadas'}
-            </button>
-          ))}
+      {toast && (
+        <div className={`px-3 py-2 rounded-lg text-sm animate-fade-in`}
+             style={{
+               background: toast.tone === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(244,63,94,0.12)',
+               color: toast.tone === 'success' ? 'rgb(16,185,129)' : 'rgb(var(--danger))',
+               border: `1px solid ${toast.tone === 'success' ? 'rgba(16,185,129,0.25)' : 'rgba(244,63,94,0.25)'}`,
+             }}>
+          {toast.msg}
         </div>
-        <button
-          onClick={searchNow}
-          disabled={searching}
-          className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-sm font-medium"
-        >
-          {searching ? 'Buscando…' : '🔍 Buscar agora'}
+      )}
+
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="glass rounded-xl p-1 flex gap-1 overflow-x-auto">
+          {TABS.map((t) => {
+            const I = t.icon;
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`btn ${active ? 'btn-primary' : 'btn-ghost'} !py-1.5 !px-3 whitespace-nowrap`}
+              >
+                <I width={14} height={14} />
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+        <button onClick={searchNow} disabled={searching} className="btn btn-secondary">
+          {searching ? <Icon.Loader width={14} height={14} /> : <Icon.Search width={14} height={14} />}
+          {searching ? 'Buscando…' : 'Buscar agora'}
         </button>
       </div>
 
       {loading ? (
-        <p className="text-slate-400">Carregando…</p>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[1, 2, 3, 4, 5, 6].map((i) => <div key={i} className="card animate-pulse" style={{ height: 320 }} />)}
+        </div>
       ) : offers.length === 0 ? (
-        <div className="bg-slate-800 rounded-xl p-12 text-center text-slate-400">
-          Nenhuma oferta {tab === 'pending' ? 'pendente' : tab === 'sent' ? 'enviada' : 'rejeitada'} ainda.
+        <div className="card text-center py-12">
+          <Icon.Sparkles width={36} height={36} className="mx-auto mb-3 text-gradient" />
+          <p style={{ color: 'rgb(var(--text-muted))' }}>
+            Nenhuma oferta {tab === 'pending' ? 'pendente' : tab === 'sent' ? 'enviada' : 'rejeitada'} ainda.
+          </p>
+          {tab === 'pending' && (
+            <button onClick={searchNow} className="btn btn-primary mt-4">
+              <Icon.Zap width={14} height={14} /> Buscar agora
+            </button>
+          )}
         </div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger">
           {offers.map((o) => (
-            <OfferCard key={o.id} offer={o} tab={tab} onApprove={() => approve(o.id)} onReject={() => reject(o.id)} />
+            <OfferCard key={o.id} offer={o} tab={tab}
+              onApprove={() => approve(o.id)} onReject={() => reject(o.id)} />
           ))}
         </div>
       )}
@@ -83,42 +109,61 @@ export default function OffersPanel({ ws }) {
 
 function OfferCard({ offer, tab, onApprove, onReject }) {
   return (
-    <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex flex-col">
-      <img src={offer.imageUrl} alt={offer.title} className="w-full h-44 object-cover bg-slate-900" loading="lazy" />
+    <div className="card card-hover !p-0 overflow-hidden flex flex-col">
+      <div className="relative aspect-[4/3] overflow-hidden" style={{ background: 'rgba(var(--bg-elevated), 0.5)' }}>
+        <img src={offer.imageUrl} alt={offer.title} className="w-full h-full object-cover transition group-hover:scale-105" loading="lazy" />
+        {offer.discountPercent > 0 && (
+          <span className="absolute top-2 left-2 badge !bg-rose-500 !text-white shadow-lg">
+            -{offer.discountPercent}%
+          </span>
+        )}
+        {offer.freeShipping && (
+          <span className="absolute top-2 right-2 badge badge-success">
+            🚚 frete grátis
+          </span>
+        )}
+      </div>
       <div className="p-4 flex-1 flex flex-col">
-        <h4 className="font-medium text-sm line-clamp-2 mb-2">{offer.title}</h4>
-        <div className="flex items-center gap-2 mb-2">
+        <h4 className="font-medium text-sm line-clamp-2 mb-2 min-h-[2.5rem]">{offer.title}</h4>
+        <div className="flex items-baseline gap-2 mb-2">
           {offer.originalPrice && offer.originalPrice > offer.price && (
-            <span className="text-xs text-slate-500 line-through">R$ {offer.originalPrice.toFixed(2)}</span>
-          )}
-          <span className="font-bold text-emerald-400">R$ {offer.price.toFixed(2)}</span>
-          {offer.discountPercent > 0 && (
-            <span className="text-xs bg-emerald-700 text-emerald-100 px-1.5 py-0.5 rounded">
-              -{offer.discountPercent}%
+            <span className="text-xs line-through" style={{ color: 'rgb(var(--text-muted))' }}>
+              R$ {offer.originalPrice.toFixed(2)}
             </span>
           )}
+          <span className="font-bold text-lg text-gradient">R$ {offer.price.toFixed(2)}</span>
         </div>
-        <div className="text-xs text-slate-500 mb-3 flex gap-2">
-          {offer.freeShipping && <span>🚚</span>}
+        <div className="text-xs mb-3 flex flex-wrap gap-x-3 gap-y-1" style={{ color: 'rgb(var(--text-muted))' }}>
           <span>{offer.soldQuantity} vendidos</span>
+          {offer.condition && <span>· {offer.condition}</span>}
         </div>
-        <a href={offer.affiliateUrl} target="_blank" rel="noreferrer" className="text-xs text-indigo-400 hover:text-indigo-300 truncate mb-3">
-          {offer.affiliateUrl}
+        <a href={offer.affiliateUrl} target="_blank" rel="noreferrer"
+           className="text-xs flex items-center gap-1 mb-3 hover:text-gradient transition"
+           style={{ color: 'rgb(var(--text-muted))' }}>
+          <Icon.ExternalLink width={12} height={12} /> Ver no ML
         </a>
 
-        <div className="mt-auto flex gap-2">
+        <div className="mt-auto">
           {tab === 'pending' && (
-            <>
-              <button onClick={onApprove} className="flex-1 px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-xs font-medium">
-                Aprovar e enviar
+            <div className="flex gap-2">
+              <button onClick={onApprove} className="btn btn-primary flex-1 !py-1.5 !text-xs">
+                <Icon.Check width={14} height={14} /> Aprovar e enviar
               </button>
-              <button onClick={onReject} className="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-xs">
-                Pular
+              <button onClick={onReject} className="btn btn-secondary !py-1.5 !px-2.5">
+                <Icon.X width={14} height={14} />
               </button>
-            </>
+            </div>
           )}
           {tab === 'sent' && offer.sentAt && (
-            <span className="text-xs text-slate-500">Enviada em {new Date(offer.sentAt).toLocaleString('pt-BR')}</span>
+            <div className="text-xs flex items-center gap-1" style={{ color: 'rgb(var(--text-muted))' }}>
+              <Icon.Check width={12} height={12} className="text-emerald-400" />
+              Enviada em {new Date(offer.sentAt).toLocaleString('pt-BR')}
+            </div>
+          )}
+          {tab === 'rejected' && (
+            <div className="text-xs" style={{ color: 'rgb(var(--text-muted))' }}>
+              Rejeitada em {new Date(offer.createdAt).toLocaleString('pt-BR')}
+            </div>
           )}
         </div>
       </div>

@@ -3,8 +3,73 @@ import { prisma } from '../db.js';
 import { waManager } from '../whatsapp/manager.js';
 import { formatOffer } from '../formatter.js';
 import { runWorkspace } from '../worker.js';
+import { audit } from '../audit.js';
 
 const router = Router();
+
+// Métricas agregadas pra dashboard
+router.get('/stats', async (_req, res) => {
+  const [workspaces, pendingCount, sentCount, rejectedCount, totalSaved, latestPending] = await Promise.all([
+    prisma.workspace.count(),
+    prisma.offer.count({ where: { status: 'pending' } }),
+    prisma.offer.count({ where: { status: 'sent' } }),
+    prisma.offer.count({ where: { status: 'rejected' } }),
+    prisma.offer.aggregate({ _sum: { discountPercent: true } }),
+    prisma.offer.findMany({
+      where: { status: 'pending' },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      include: { workspace: { select: { name: true, id: true } } },
+    }),
+  ]);
+
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const byDay = await prisma.offer.groupBy({
+    by: ['status'],
+    _count: { _all: true },
+    where: { createdAt: { gte: since } },
+  });
+
+  // Pendentes por workspace (top)
+  const pendingByWs = await prisma.offer.groupBy({
+    by: ['workspaceId'],
+    where: { status: 'pending' },
+    _count: { _all: true },
+    orderBy: { _count: { workspaceId: 'desc' } },
+    take: 5,
+  });
+  const wsMap = await prisma.workspace.findMany({
+    where: { id: { in: pendingByWs.map((p) => p.workspaceId) } },
+    select: { id: true, name: true },
+  });
+  const wsName = Object.fromEntries(wsMap.map((w) => [w.id, w.name]));
+
+  res.json({
+    workspaces,
+    offers: {
+      pending: pendingCount,
+      sent: sentCount,
+      rejected: rejectedCount,
+      total: pendingCount + sentCount + rejectedCount,
+    },
+    last7d: Object.fromEntries(byDay.map((b) => [b.status, b._count._all])),
+    latestPending: latestPending.map((o) => ({
+      id: o.id,
+      title: o.title,
+      imageUrl: o.imageUrl,
+      price: o.price,
+      discountPercent: o.discountPercent,
+      workspaceId: o.workspaceId,
+      workspaceName: o.workspace.name,
+      createdAt: o.createdAt,
+    })),
+    topPendingWorkspaces: pendingByWs.map((p) => ({
+      id: p.workspaceId,
+      name: wsName[p.workspaceId] ?? '—',
+      count: p._count._all,
+    })),
+  });
+});
 
 router.get('/', async (_req, res) => {
   const items = await prisma.workspace.findMany({
@@ -36,6 +101,7 @@ router.post('/', async (req, res) => {
       intervalMin: intervalMin ?? 60,
     },
   });
+  audit('workspace.create', { entity: 'workspace', entityId: ws.id, workspaceId: ws.id, payload: { name } });
   res.status(201).json(ws);
 });
 
@@ -59,6 +125,7 @@ router.patch('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   await waManager.stop(req.params.id).catch(() => {});
   await prisma.workspace.delete({ where: { id: req.params.id } });
+  audit('workspace.delete', { entity: 'workspace', entityId: req.params.id, workspaceId: req.params.id });
   res.json({ ok: true });
 });
 
@@ -163,6 +230,7 @@ router.post('/:id/offers/:offerId/approve', async (req, res) => {
     where: { id: offer.id },
     data: { status: 'sent', sentAt: new Date() },
   });
+  audit('offer.approve', { entity: 'offer', entityId: offer.id, workspaceId: req.params.id, payload: { title: offer.title } });
   res.json({ ok: true });
 });
 
@@ -171,6 +239,7 @@ router.post('/:id/offers/:offerId/reject', async (req, res) => {
     where: { id: req.params.offerId },
     data: { status: 'rejected' },
   });
+  audit('offer.reject', { entity: 'offer', entityId: req.params.offerId, workspaceId: req.params.id });
   res.json({ ok: true });
 });
 

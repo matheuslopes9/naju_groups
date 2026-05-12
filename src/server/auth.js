@@ -1,17 +1,36 @@
 import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { prisma } from './db.js';
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 dias
 const COOKIE_NAME = 'naju_session';
 
-function dashboardPassword() {
-  const v = process.env.DASHBOARD_PASSWORD;
-  if (!v) throw new Error('DASHBOARD_PASSWORD não configurada');
-  return v;
+/**
+ * Suporta dois modos:
+ *  1) DASHBOARD_PASSWORD em texto claro (compare === direto)
+ *  2) DASHBOARD_PASSWORD_HASH bcrypt (mais seguro, recomendado)
+ * Se ambos definidos, hash tem prioridade.
+ */
+async function verifyPassword(input) {
+  const trimmed = (input ?? '').toString();
+  const hash = process.env.DASHBOARD_PASSWORD_HASH;
+  if (hash) {
+    return bcrypt.compare(trimmed, hash);
+  }
+  const plain = process.env.DASHBOARD_PASSWORD;
+  if (!plain) {
+    throw new Error('Nem DASHBOARD_PASSWORD nem DASHBOARD_PASSWORD_HASH configurados no .env');
+  }
+  // timingSafeEqual evita ataque de timing
+  const a = Buffer.from(trimmed);
+  const b = Buffer.from(plain);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 export async function login(password) {
-  if (password !== dashboardPassword()) {
+  const valid = await verifyPassword(password);
+  if (!valid) {
     throw new Error('Senha inválida');
   }
   const token = crypto.randomBytes(32).toString('hex');

@@ -1,6 +1,7 @@
 import WorkspaceForm from './WorkspaceForm.jsx';
 import { api } from '../api.js';
 import { useState } from 'react';
+import { Icon } from './Icon.jsx';
 
 export default function FiltersPanel({ ws, reload }) {
   const [saved, setSaved] = useState(false);
@@ -8,8 +9,7 @@ export default function FiltersPanel({ ws, reload }) {
 
   async function save(data) {
     await api.updateWorkspace(ws.id, data);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setSaved(true); setTimeout(() => setSaved(false), 2000);
     reload();
   }
 
@@ -20,30 +20,51 @@ export default function FiltersPanel({ ws, reload }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-        <h3 className="font-semibold mb-3">Filtros de busca</h3>
+    <div className="space-y-5">
+      <div className="card">
+        <h3 className="font-semibold flex items-center gap-2 mb-4">
+          <Icon.Filter /> Filtros de busca
+        </h3>
         <WorkspaceForm initial={ws} onSubmit={save} />
-        {saved && <p className="text-sm text-emerald-400 mt-3">Salvo ✓</p>}
+        {saved && (
+          <div className="mt-3 flex items-center gap-2 text-sm animate-fade-in" style={{ color: 'rgb(16,185,129)' }}>
+            <Icon.Check width={14} height={14} /> Filtros salvos
+          </div>
+        )}
       </div>
 
-      <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-        <h3 className="font-semibold mb-3">Busca automática</h3>
-        <label className="inline-flex items-center gap-3">
-          <input
-            type="checkbox"
-            checked={auto}
-            onChange={(e) => toggleAuto(e.target.checked)}
-            className="w-5 h-5"
-          />
-          <span className="text-sm">
-            Buscar ofertas automaticamente a cada <strong>{ws.intervalMin} min</strong>
-          </span>
-        </label>
-        <p className="text-xs text-slate-500 mt-2">
-          Lembrete: ofertas vão pro inbox como pendentes; nada é enviado a grupo sem sua aprovação manual.
-        </p>
+      <div className="card">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <h3 className="font-semibold flex items-center gap-2 mb-1">
+              <Icon.Zap className={auto ? 'text-emerald-400' : ''} /> Busca automática
+            </h3>
+            <p className="text-sm" style={{ color: 'rgb(var(--text-muted))' }}>
+              Buscar ofertas a cada <strong>{ws.intervalMin} min</strong>. Ofertas vão pro inbox como
+              <em> pendentes</em> — nada é enviado a grupo sem sua aprovação manual.
+            </p>
+          </div>
+          <Toggle checked={auto} onChange={toggleAuto} />
+        </div>
       </div>
     </div>
+  );
+}
+
+function Toggle({ checked, onChange }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${
+        checked ? 'bg-gradient-brand' : 'bg-slate-500/40'
+      }`}
+      role="switch"
+      aria-checked={checked}
+    >
+      <span className={`inline-block w-5 h-5 rounded-full bg-white shadow transform transition-transform ${
+        checked ? 'translate-x-5' : 'translate-x-0.5'
+      } mt-0.5`} />
+    </button>
   );
 }

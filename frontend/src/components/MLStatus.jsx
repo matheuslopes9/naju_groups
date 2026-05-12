@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { Icon } from './Icon.jsx';
 
 export default function MLStatus() {
   const [status, setStatus] = useState(null);
@@ -9,22 +10,45 @@ export default function MLStatus() {
   }, []);
 
   if (!status) return null;
+
   if (status.connected) {
     return (
-      <div className="bg-emerald-950/50 border border-emerald-800 rounded-xl px-4 py-3 flex items-center gap-3">
-        <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-        <span className="text-sm text-emerald-200">Mercado Livre conectado {status.userId ? `(user ${status.userId})` : ''}</span>
+      <div className="glass rounded-xl px-4 py-3 flex items-center gap-3 animate-fade-in"
+           style={{ borderColor: 'rgba(16,185,129,0.3)' }}>
+        <span className="relative flex w-2.5 h-2.5">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
+          <span className="relative inline-flex w-2.5 h-2.5 rounded-full bg-emerald-400" />
+        </span>
+        <div className="flex-1">
+          <div className="text-sm font-medium" style={{ color: 'rgb(16,185,129)' }}>
+            Mercado Livre conectado
+          </div>
+          {status.userId && (
+            <div className="text-xs" style={{ color: 'rgb(var(--text-muted))' }}>
+              user {status.userId} · token renova automaticamente
+            </div>
+          )}
+        </div>
       </div>
     );
   }
+
   return (
-    <div className="bg-amber-950/50 border border-amber-800 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+    <div className="glass rounded-xl px-4 py-3 flex items-center justify-between gap-3 animate-fade-in"
+         style={{ borderColor: 'rgba(245,158,11,0.3)' }}>
       <div className="flex items-center gap-3">
-        <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-        <span className="text-sm text-amber-200">Mercado Livre ainda não autorizado</span>
+        <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+        <div>
+          <div className="text-sm font-medium" style={{ color: 'rgb(245,158,11)' }}>
+            Mercado Livre não autorizado
+          </div>
+          <div className="text-xs" style={{ color: 'rgb(var(--text-muted))' }}>
+            Conecte sua conta de afiliada para buscar ofertas
+          </div>
+        </div>
       </div>
-      <a href="/api/ml/authorize" className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white">
-        Autorizar agora
+      <a href="/api/ml/authorize" className="btn btn-primary !text-xs !py-1.5">
+        <Icon.Zap width={14} height={14} /> Autorizar
       </a>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from './Icon.jsx';
 
 export default function WorkspaceForm({ initial, onSubmit }) {
   const [form, setForm] = useState(initial ?? {
@@ -12,50 +13,66 @@ export default function WorkspaceForm({ initial, onSubmit }) {
     maxPerRun: 3,
     intervalMin: 60,
   });
+  const [saving, setSaving] = useState(false);
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
 
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true);
+    try { await onSubmit(form); }
+    finally { setSaving(false); }
+  }
+
   return (
-    <form onSubmit={(e) => { e.preventDefault(); onSubmit(form); }} className="space-y-4">
-      <div className="grid md:grid-cols-2 gap-4">
-        <Field label="Nome">
-          <input required value={form.name} onChange={(e) => set('name', e.target.value)} className="input" placeholder="Ex: Beauty Deals" />
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Nome" required>
+          <input required value={form.name} onChange={(e) => set('name', e.target.value)} className="input"
+                 placeholder="Ex: Beauty Deals" />
         </Field>
         <Field label="Nicho">
-          <input value={form.niche} onChange={(e) => set('niche', e.target.value)} className="input" placeholder="Beleza, Tech, Casa..." />
+          <input value={form.niche} onChange={(e) => set('niche', e.target.value)} className="input"
+                 placeholder="Beleza, Tech, Casa…" />
         </Field>
       </div>
-      <Field label="Termo de busca padrão">
-        <input value={form.searchQuery} onChange={(e) => set('searchQuery', e.target.value)} className="input" placeholder="ex: maquiagem, skincare" />
+      <Field label="Termo de busca">
+        <input value={form.searchQuery} onChange={(e) => set('searchQuery', e.target.value)} className="input"
+               placeholder="ex: maquiagem, skincare" />
       </Field>
-      <div className="grid md:grid-cols-3 gap-4">
-        <Field label="Desconto mínimo (%)">
-          <input type="number" value={form.minDiscount} onChange={(e) => set('minDiscount', Number(e.target.value))} className="input" />
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Desconto mín %">
+          <input type="number" min="0" max="99" value={form.minDiscount}
+                 onChange={(e) => set('minDiscount', Number(e.target.value))} className="input" />
         </Field>
-        <Field label="Máx por rodada">
-          <input type="number" value={form.maxPerRun} onChange={(e) => set('maxPerRun', Number(e.target.value))} className="input" />
+        <Field label="Máx/rodada">
+          <input type="number" min="1" max="50" value={form.maxPerRun}
+                 onChange={(e) => set('maxPerRun', Number(e.target.value))} className="input" />
         </Field>
         <Field label="Intervalo (min)">
-          <input type="number" value={form.intervalMin} onChange={(e) => set('intervalMin', Number(e.target.value))} className="input" />
+          <input type="number" min="5" max="1440" value={form.intervalMin}
+                 onChange={(e) => set('intervalMin', Number(e.target.value))} className="input" />
         </Field>
       </div>
-      <div className="flex gap-4">
-        <Checkbox label="Só com frete grátis" checked={form.onlyFreeShipping} onChange={(v) => set('onlyFreeShipping', v)} />
-        <Checkbox label="Só promoções (DEAL)"   checked={form.onlyDeals} onChange={(v) => set('onlyDeals', v)} />
+      <div className="flex flex-wrap gap-4 pt-1">
+        <Checkbox label="Frete grátis"  checked={form.onlyFreeShipping} onChange={(v) => set('onlyFreeShipping', v)} />
+        <Checkbox label="Só promoções"  checked={form.onlyDeals}        onChange={(v) => set('onlyDeals', v)} />
       </div>
-      <button className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 font-medium">Salvar</button>
-      <style>{`
-        .input { width: 100%; padding: 0.5rem 0.75rem; border-radius: 0.5rem; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; }
-        .input:focus { outline: none; border-color: #6366f1; }
-      `}</style>
+      <button type="submit" disabled={saving} className="btn btn-primary">
+        {saving ? <Icon.Loader width={14} height={14} /> : <Icon.Check width={14} height={14} />}
+        {saving ? 'Salvando…' : 'Salvar'}
+      </button>
     </form>
   );
 }
 
-function Field({ label, children }) {
+function Field({ label, required, children }) {
   return (
     <label className="block">
-      <span className="block text-sm text-slate-300 mb-1">{label}</span>
+      <span className="block text-sm font-medium mb-1.5">
+        {label}
+        {required && <span className="text-rose-400 ml-1">*</span>}
+      </span>
       {children}
     </label>
   );
@@ -63,8 +80,17 @@ function Field({ label, children }) {
 
 function Checkbox({ label, checked, onChange }) {
   return (
-    <label className="inline-flex items-center gap-2 text-sm text-slate-300">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="w-4 h-4" />
+    <label className="inline-flex items-center gap-2 text-sm cursor-pointer select-none">
+      <span
+        onClick={() => onChange(!checked)}
+        className={`relative w-5 h-5 rounded-md border transition flex items-center justify-center ${
+          checked ? 'bg-gradient-brand border-transparent' : ''
+        }`}
+        style={!checked ? { borderColor: 'rgb(var(--border-strong))', background: 'rgba(var(--bg-elevated), 0.6)' } : {}}
+      >
+        {checked && <Icon.Check width={12} height={12} className="text-white" strokeWidth={3} />}
+      </span>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="sr-only" />
       {label}
     </label>
   );

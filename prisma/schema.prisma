@@ -109,3 +109,18 @@ model AuthSession {
 
   @@map("auth_sessions")
 }
+
+// Log de ações importantes (auditoria)
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String   // 'login', 'logout', 'workspace.create', 'offer.approve', etc
+  entity      String?  // workspace | offer | group | ml | wa
+  entityId    String?  @map("entity_id")
+  workspaceId String?  @map("workspace_id")
+  payload     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("audit_logs")
+}
