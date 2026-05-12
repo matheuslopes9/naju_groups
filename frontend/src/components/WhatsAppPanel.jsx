@@ -1,40 +1,31 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { subscribe } from '../ws.js';
 import { Icon } from './Icon.jsx';
 
 export default function WhatsAppPanel({ ws, reload }) {
   const [status, setStatus] = useState(ws.wa);
-  const wsRef = useRef(null);
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     poll();
-    const interval = setInterval(poll, 3000);
-    connectWebsocket();
-    return () => {
-      clearInterval(interval);
-      wsRef.current?.close();
-    };
+    const interval = setInterval(poll, 5000);
+    const unsub = subscribe((evt) => {
+      if (evt.type === 'wa-update' && evt.workspaceId === ws.id) {
+        setStatus((s) => ({ ...s, ...evt, qrDataUrl: evt.qrDataUrl ?? s?.qrDataUrl }));
+      }
+    });
+    return () => { clearInterval(interval); unsub(); };
   }, [ws.id]);
 
   async function poll() {
     try { setStatus(await api.waStatus(ws.id)); } catch {}
   }
 
-  function connectWebsocket() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const sock = new WebSocket(`${proto}//${location.host}/ws`);
-    wsRef.current = sock;
-    sock.onmessage = (e) => {
-      try {
-        const evt = JSON.parse(e.data);
-        if (evt.type === 'wa-update' && evt.workspaceId === ws.id) {
-          setStatus((s) => ({ ...s, ...evt, qrDataUrl: evt.qrDataUrl ?? s?.qrDataUrl }));
-        }
-      } catch {}
-    };
+  async function connect() {
+    setConnecting(true);
+    try { await api.waConnect(ws.id); } finally { setConnecting(false); poll(); }
   }
-
-  async function connect() { await api.waConnect(ws.id); poll(); }
   async function disconnect() {
     if (!confirm('Desconectar este WhatsApp?')) return;
     await api.waDisconnect(ws.id);
@@ -65,8 +56,9 @@ export default function WhatsAppPanel({ ws, reload }) {
               <Icon.X width={14} height={14} /> Desconectar
             </button>
           ) : (
-            <button onClick={connect} className="btn btn-primary">
-              <Icon.Zap width={14} height={14} /> Conectar
+            <button onClick={connect} disabled={connecting} className="btn btn-primary">
+              {connecting ? <Icon.Loader width={14} height={14} /> : <Icon.Zap width={14} height={14} />}
+              Conectar
             </button>
           )}
         </div>

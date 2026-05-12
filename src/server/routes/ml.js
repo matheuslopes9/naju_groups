@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getAuthorizeUrl, exchangeCodeForToken, getMlStatus } from '../ml/oauth.js';
+import { audit } from '../audit.js';
 
 const router = Router();
 
@@ -26,6 +27,7 @@ router.get('/callback', async (req, res) => {
   if (!code) return res.status(400).send('Faltou ?code= na URL.');
   try {
     await exchangeCodeForToken(String(code));
+    audit('ml.authorize', { entity: 'ml' });
     res.type('html').send(`
       <html><body style="font-family:sans-serif;padding:40px;text-align:center">
         <h1>✅ Mercado Livre autorizado</h1>

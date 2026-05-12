@@ -1,38 +1,63 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import { toast } from '../toast.jsx';
 import Layout from '../components/Layout.jsx';
 import WorkspaceForm from '../components/WorkspaceForm.jsx';
 import MLStatus from '../components/MLStatus.jsx';
+import Onboarding from '../components/Onboarding.jsx';
 import { Icon } from '../components/Icon.jsx';
 
 export default function Dashboard() {
   const [workspaces, setWorkspaces] = useState([]);
   const [stats, setStats] = useState(null);
+  const [mlStatus, setMlStatus] = useState({ connected: false });
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  const formRef = useRef(null);
 
   async function load() {
     setLoading(true);
     try {
-      const [ws, st] = await Promise.all([api.listWorkspaces(), api.stats()]);
+      const [ws, st, ml] = await Promise.all([
+        api.listWorkspaces(),
+        api.stats(),
+        api.mlStatus().catch(() => ({ connected: false })),
+      ]);
       setWorkspaces(ws);
       setStats(st);
+      setMlStatus(ml);
     } finally { setLoading(false); }
   }
 
   useEffect(() => { load(); }, []);
 
   async function handleCreate(data) {
-    await api.createWorkspace(data);
-    setShowForm(false);
-    load();
+    try {
+      await api.createWorkspace(data);
+      toast.success(`Workspace "${data.name}" criado`);
+      setShowForm(false);
+      load();
+    } catch (e) { toast.error(e.message); }
   }
+
+  function startCreate() {
+    setShowForm(true);
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  }
+
+  const hasWorkspaces = workspaces.length > 0;
 
   return (
     <Layout>
       <div className="space-y-6">
-        <MLStatus />
+        {hasWorkspaces && <MLStatus />}
+
+        <Onboarding
+          hasWorkspaces={hasWorkspaces}
+          mlConnected={mlStatus.connected}
+          onStartCreate={startCreate}
+        />
 
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -63,7 +88,7 @@ export default function Dashboard() {
 
         {/* Form de criação */}
         {showForm && (
-          <div className="card animate-fade-in-scale">
+          <div ref={formRef} className="card animate-fade-in-scale">
             <h3 className="font-semibold mb-4 flex items-center gap-2">
               <Icon.Plus /> Novo workspace
             </h3>

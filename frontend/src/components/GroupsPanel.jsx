@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { toast } from '../toast.jsx';
 import { Icon } from './Icon.jsx';
 
 export default function GroupsPanel({ ws }) {
@@ -21,11 +22,17 @@ export default function GroupsPanel({ ws }) {
   useEffect(() => { load(); }, [ws.id]);
 
   async function addGroup(jid, name) {
-    await api.addGroup(ws.id, { jid, name, type: 'staging' });
-    load();
+    try {
+      await api.addGroup(ws.id, { jid, name, type: 'staging' });
+      toast.success(`Grupo "${name}" cadastrado`);
+      load();
+    } catch (e) { toast.error(e.message); }
   }
-  async function removeGroup(gid) {
-    await api.deleteGroup(ws.id, gid); load();
+  async function removeGroup(gid, name) {
+    if (!confirm(`Remover o grupo "${name}" do cadastro?`)) return;
+    await api.deleteGroup(ws.id, gid);
+    toast.info('Grupo removido');
+    load();
   }
 
   const registeredJids = new Set(registered.map((g) => g.jid));
@@ -54,7 +61,7 @@ export default function GroupsPanel({ ws }) {
                     <span className="badge badge-muted !text-[10px] !px-1.5 !py-0">{g.type}</span>
                   </div>
                 </div>
-                <button onClick={() => removeGroup(g.id)} className="btn btn-ghost !p-1.5 !text-rose-400 hover:!bg-rose-500/10">
+                <button onClick={() => removeGroup(g.id, g.name)} className="btn btn-ghost !p-1.5 !text-rose-400 hover:!bg-rose-500/10">
                   <Icon.Trash width={14} height={14} />
                 </button>
               </li>

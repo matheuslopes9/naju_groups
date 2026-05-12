@@ -132,11 +132,13 @@ router.delete('/:id', async (req, res) => {
 // WhatsApp ações
 router.post('/:id/whatsapp/connect', async (req, res) => {
   await waManager.start(req.params.id);
+  audit('wa.connect', { entity: 'wa', workspaceId: req.params.id });
   res.json({ ok: true, status: waManager.getStatus(req.params.id) });
 });
 
 router.post('/:id/whatsapp/disconnect', async (req, res) => {
   await waManager.stop(req.params.id);
+  audit('wa.disconnect', { entity: 'wa', workspaceId: req.params.id });
   res.json({ ok: true });
 });
 
@@ -183,6 +185,7 @@ router.post('/:id/search', async (req, res) => {
   if (!ws) return res.status(404).json({ error: 'not found' });
   try {
     const saved = await runWorkspace(ws);
+    audit('offer.search', { entity: 'offer', workspaceId: ws.id, payload: { saved } });
     res.json({ ok: true, saved });
   } catch (e) {
     res.status(500).json({ error: e.message });

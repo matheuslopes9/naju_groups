@@ -1,5 +1,6 @@
 import WorkspaceForm from './WorkspaceForm.jsx';
 import { api } from '../api.js';
+import { toast } from '../toast.jsx';
 import { useState } from 'react';
 import { Icon } from './Icon.jsx';
 
@@ -8,15 +9,21 @@ export default function FiltersPanel({ ws, reload }) {
   const [auto, setAuto] = useState(ws.autoSearch);
 
   async function save(data) {
-    await api.updateWorkspace(ws.id, data);
-    setSaved(true); setTimeout(() => setSaved(false), 2000);
-    reload();
+    try {
+      await api.updateWorkspace(ws.id, data);
+      setSaved(true); setTimeout(() => setSaved(false), 2000);
+      toast.success('Filtros atualizados');
+      reload();
+    } catch (e) { toast.error(e.message); }
   }
 
   async function toggleAuto(v) {
     setAuto(v);
-    await api.updateWorkspace(ws.id, { autoSearch: v });
-    reload();
+    try {
+      await api.updateWorkspace(ws.id, { autoSearch: v });
+      toast.success(v ? 'Busca automática ativada' : 'Busca automática desativada');
+      reload();
+    } catch (e) { toast.error(e.message); setAuto(!v); }
   }
 
   return (

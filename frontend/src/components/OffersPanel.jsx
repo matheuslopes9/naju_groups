@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { toast } from '../toast.jsx';
 import { Icon } from './Icon.jsx';
 
 const TABS = [
@@ -13,7 +14,6 @@ export default function OffersPanel({ ws }) {
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
-  const [toast, setToast] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -26,36 +26,29 @@ export default function OffersPanel({ ws }) {
     setSearching(true);
     try {
       const r = await api.searchNow(ws.id);
-      setToast({ msg: `${r.saved} nova(s) oferta(s) salva(s)`, tone: 'success' });
-      setTimeout(() => setToast(null), 3000);
+      if (r.saved > 0) toast.success(`${r.saved} nova(s) oferta(s) salva(s)`);
+      else toast.info('Nenhuma oferta nova encontrada com os filtros atuais');
       load();
     } catch (e) {
-      setToast({ msg: e.message, tone: 'danger' });
-      setTimeout(() => setToast(null), 5000);
+      toast.error(e.message);
     } finally { setSearching(false); }
   }
 
   async function approve(oid) {
-    try { await api.approveOffer(ws.id, oid); load(); }
-    catch (e) { alert(e.message); }
+    try {
+      await api.approveOffer(ws.id, oid);
+      toast.success('Oferta aprovada e enviada ao grupo de staging');
+      load();
+    } catch (e) { toast.error(e.message); }
   }
   async function reject(oid) {
-    await api.rejectOffer(ws.id, oid); load();
+    await api.rejectOffer(ws.id, oid);
+    toast.info('Oferta rejeitada');
+    load();
   }
 
   return (
     <div className="space-y-4">
-      {toast && (
-        <div className={`px-3 py-2 rounded-lg text-sm animate-fade-in`}
-             style={{
-               background: toast.tone === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(244,63,94,0.12)',
-               color: toast.tone === 'success' ? 'rgb(16,185,129)' : 'rgb(var(--danger))',
-               border: `1px solid ${toast.tone === 'success' ? 'rgba(16,185,129,0.25)' : 'rgba(244,63,94,0.25)'}`,
-             }}>
-          {toast.msg}
-        </div>
-      )}
-
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="glass rounded-xl p-1 flex gap-1 overflow-x-auto">
           {TABS.map((t) => {

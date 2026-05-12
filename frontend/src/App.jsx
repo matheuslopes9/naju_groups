@@ -1,10 +1,12 @@
-import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
+import { Toaster } from './toast.jsx';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import WorkspaceDetail from './pages/WorkspaceDetail.jsx';
 import Audit from './pages/Audit.jsx';
+import NotFound from './pages/NotFound.jsx';
 
 export default function App() {
   const [authState, setAuthState] = useState('loading'); // loading | yes | no
@@ -34,12 +36,15 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      <Route path="/login" element={<Login onSuccess={() => navigate('/')} />} />
-      <Route path="/" element={<Dashboard />} />
-      <Route path="/workspaces/:id" element={<WorkspaceDetail />} />
-      <Route path="/audit" element={<Audit />} />
-      <Route path="*" element={<Navigate to="/" />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/login" element={<Login onSuccess={() => navigate('/')} />} />
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/workspaces/:id" element={<WorkspaceDetail />} />
+        <Route path="/audit" element={<Audit />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+      <Toaster />
+    </>
   );
 }

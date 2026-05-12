@@ -1,6 +1,8 @@
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { subscribe } from '../ws.js';
+import { toast } from '../toast.jsx';
 import Logo from './Logo.jsx';
 import ThemeToggle from './ThemeToggle.jsx';
 import { Icon } from './Icon.jsx';
@@ -8,28 +10,49 @@ import { Icon } from './Icon.jsx';
 export default function Layout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pendingBadge, setPendingBadge] = useState(0);
+  const [hasNew, setHasNew] = useState(false);
   const loc = useLocation();
 
   useEffect(() => { setMobileOpen(false); }, [loc.pathname]);
 
-  // Polling do badge a cada 15s
+  // Polling do badge a cada 20s + WS push quando WA reconecta/desconecta
   useEffect(() => {
     let active = true;
+    let prevPending = null;
     async function tick() {
       try {
         const s = await api.stats();
-        if (active) setPendingBadge(s.offers?.pending ?? 0);
+        if (!active) return;
+        const cur = s.offers?.pending ?? 0;
+        if (prevPending != null && cur > prevPending) {
+          setHasNew(true);
+          toast.info(`${cur - prevPending} nova(s) oferta(s) pendente(s)`);
+        }
+        prevPending = cur;
+        setPendingBadge(cur);
       } catch {}
     }
     tick();
-    const interval = setInterval(tick, 15000);
-    return () => { active = false; clearInterval(interval); };
+    const interval = setInterval(tick, 20000);
+
+    const unsub = subscribe((evt) => {
+      if (evt.type === 'wa-update' && evt.status === 'connected') {
+        toast.success('WhatsApp conectado');
+      }
+      if (evt.type === 'wa-update' && evt.status === 'disconnected') {
+        toast.warn('WhatsApp desconectado');
+      }
+    });
+
+    return () => { active = false; clearInterval(interval); unsub(); };
   }, []);
 
   async function logout() {
     await api.logout();
     window.location.href = '/login';
   }
+
+  function clearBadge() { setHasNew(false); }
 
   const nav = [
     { to: '/',         label: 'Dashboard', icon: Icon.Home },
@@ -82,9 +105,9 @@ export default function Layout({ children }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <button className="btn btn-ghost !p-2 relative" aria-label="Notificações">
+            <button onClick={clearBadge} className="btn btn-ghost !p-2 relative" aria-label="Notificações">
               <Icon.Bell />
-              {pendingBadge > 0 && (
+              {hasNew && (
                 <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-gradient-brand animate-pulse-glow" />
               )}
             </button>
