@@ -18,6 +18,8 @@ export function getAuthorizeUrl() {
     response_type: 'code',
     client_id: env('ML_CLIENT_ID'),
     redirect_uri: env('ML_REDIRECT_URI'),
+    // offline_access garante que o ML devolva refresh_token (token vence em 6h sem isso)
+    scope: 'offline_access read',
   });
   return `${AUTH_URL}?${params.toString()}`;
 }

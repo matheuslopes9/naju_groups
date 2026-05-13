@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 
@@ -46,7 +47,8 @@ export default function Onboarding({ hasWorkspaces, mlConnected, onStartCreate }
               <span className="text-gradient">✨</span> Bem-vindo ao Naju Groups
             </h2>
             <p className="text-sm mt-1" style={{ color: 'rgb(var(--text-muted))' }}>
-              Siga os passos abaixo para começar a curar ofertas
+              Siga os passos abaixo para começar a curar ofertas ·
+              {' '}<Link to="/tutoriais" className="text-gradient hover:underline">tutoriais detalhados →</Link>
             </p>
           </div>
           <span className="badge badge-muted">{totalDone} / {steps.length}</span>

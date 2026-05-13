@@ -55,8 +55,9 @@ export default function Layout({ children }) {
   function clearBadge() { setHasNew(false); }
 
   const nav = [
-    { to: '/',         label: 'Dashboard', icon: Icon.Home },
-    { to: '/audit',    label: 'Atividade', icon: Icon.Activity },
+    { to: '/',           label: 'Dashboard', icon: Icon.Home },
+    { to: '/audit',      label: 'Atividade', icon: Icon.Activity },
+    { to: '/tutoriais',  label: 'Tutoriais', icon: Icon.Sparkles },
   ];
 
   return (

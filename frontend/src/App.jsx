@@ -6,6 +6,7 @@ import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import WorkspaceDetail from './pages/WorkspaceDetail.jsx';
 import Audit from './pages/Audit.jsx';
+import Tutorials from './pages/Tutorials.jsx';
 import NotFound from './pages/NotFound.jsx';
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/workspaces/:id" element={<WorkspaceDetail />} />
         <Route path="/audit" element={<Audit />} />
+        <Route path="/tutoriais" element={<Tutorials />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       <Toaster />

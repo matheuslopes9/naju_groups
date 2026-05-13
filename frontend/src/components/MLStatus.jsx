@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { Icon } from './Icon.jsx';
 
@@ -47,9 +48,14 @@ export default function MLStatus() {
           </div>
         </div>
       </div>
-      <a href="/api/ml/authorize" className="btn btn-primary !text-xs !py-1.5">
-        <Icon.Zap width={14} height={14} /> Autorizar
-      </a>
+      <div className="flex items-center gap-2 shrink-0">
+        <Link to="/tutoriais" className="btn btn-ghost !text-xs !py-1.5">
+          Como fazer?
+        </Link>
+        <a href="/api/ml/authorize" className="btn btn-primary !text-xs !py-1.5">
+          <Icon.Zap width={14} height={14} /> Autorizar
+        </a>
+      </div>
     </div>
   );
 }
