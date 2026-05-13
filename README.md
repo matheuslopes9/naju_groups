@@ -41,7 +41,10 @@ Workspace "Casa"    ─►  📱 (11) 9Z-Z  ─►  Grupos: Decor Brasil
 | `POST /api/auth/logout` | Logout |
 | `GET /api/auth/me` | Status de sessão |
 | `GET /api/ml/status` | Status OAuth ML |
-| `GET /api/ml/authorize` | Inicia autorização ML |
+| `GET /ml/authorize` | Inicia autorização ML (público — redireciona pro ML) |
+| `GET /ml/callback` | Callback OAuth (público) |
+| `GET /api/ml/app` | Lê config do app ML (nunca retorna secret) |
+| `POST /api/ml/app` | Salva config do app ML (secret criptografado) |
 | `GET /api/workspaces` | Lista workspaces |
 | `POST /api/workspaces` | Cria workspace |
 | `GET/PATCH/DELETE /api/workspaces/:id` | CRUD |

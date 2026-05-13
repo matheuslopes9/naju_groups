@@ -24,7 +24,7 @@ export default function Onboarding({ hasWorkspaces, mlConnected, onStartCreate }
       done: mlConnected,
       title: 'Autorizar acesso à sua conta de afiliada',
       desc: 'Depois de configurar o app, clique em Autorizar pra linkar à sua conta.',
-      cta: mlConnected ? null : { label: 'Autorizar agora', href: '/api/ml/authorize', icon: Icon.Zap },
+      cta: mlConnected ? null : { label: 'Autorizar agora', href: '/ml/authorize', icon: Icon.Zap },
     },
     {
       id: 'ws',

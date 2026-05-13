@@ -52,7 +52,7 @@ export default function MLStatus() {
         <Link to="/tutoriais" className="btn btn-ghost !text-xs !py-1.5">
           Como fazer?
         </Link>
-        <a href="/api/ml/authorize" className="btn btn-primary !text-xs !py-1.5">
+        <a href="/ml/authorize" className="btn btn-primary !text-xs !py-1.5">
           <Icon.Zap width={14} height={14} /> Autorizar
         </a>
       </div>

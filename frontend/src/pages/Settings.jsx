@@ -103,14 +103,14 @@ export default function Settings() {
           </div>
           {mlStatus?.connected && (
             <div className="mt-3 flex flex-wrap gap-2">
-              <a href="/api/ml/authorize" className="btn btn-secondary !text-xs">
+              <a href="/ml/authorize" className="btn btn-secondary !text-xs">
                 <Icon.RefreshCw width={14} height={14} /> Reautorizar
               </a>
             </div>
           )}
           {!mlStatus?.connected && appCfg?.configured && (
             <div className="mt-3">
-              <a href="/api/ml/authorize" className="btn btn-primary !text-xs">
+              <a href="/ml/authorize" className="btn btn-primary !text-xs">
                 <Icon.Zap width={14} height={14} /> Autorizar agora
               </a>
             </div>
