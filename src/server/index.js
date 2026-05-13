@@ -12,6 +12,7 @@ import { startWorker } from './worker.js';
 import authRouter from './routes/auth.js';
 import workspacesRouter from './routes/workspaces.js';
 import mlRouter from './routes/ml.js';
+import mlPublicRouter from './routes/ml-public.js';
 import auditRouter from './routes/audit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
