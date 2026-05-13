@@ -13,10 +13,17 @@ export default function Onboarding({ hasWorkspaces, mlConnected, onStartCreate }
 
   const steps = [
     {
-      id: 'ml',
+      id: 'ml-app',
       done: mlConnected,
-      title: 'Conectar Mercado Livre',
-      desc: 'Autorize sua conta de afiliada para que o sistema possa buscar ofertas.',
+      title: 'Configurar app do Mercado Livre',
+      desc: 'Cadastre o Client ID e Secret obtidos no DevCenter do ML em Configurações.',
+      cta: mlConnected ? null : { label: 'Ir para Configurações', linkTo: '/configuracoes', icon: Icon.Settings },
+    },
+    {
+      id: 'ml-auth',
+      done: mlConnected,
+      title: 'Autorizar acesso à sua conta de afiliada',
+      desc: 'Depois de configurar o app, clique em Autorizar pra linkar à sua conta.',
       cta: mlConnected ? null : { label: 'Autorizar agora', href: '/api/ml/authorize', icon: Icon.Zap },
     },
     {
@@ -68,7 +75,11 @@ export default function Onboarding({ hasWorkspaces, mlConnected, onStartCreate }
                 <p className="text-xs mt-0.5" style={{ color: 'rgb(var(--text-muted))' }}>{s.desc}</p>
               </div>
               {s.cta && (
-                s.cta.href ? (
+                s.cta.linkTo ? (
+                  <Link to={s.cta.linkTo} className="btn btn-primary !text-xs !py-1.5 shrink-0">
+                    <s.cta.icon width={14} height={14} /> {s.cta.label}
+                  </Link>
+                ) : s.cta.href ? (
                   <a href={s.cta.href} className="btn btn-primary !text-xs !py-1.5 shrink-0">
                     <s.cta.icon width={14} height={14} /> {s.cta.label}
                   </a>

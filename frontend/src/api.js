@@ -29,6 +29,9 @@ export const api = {
 
   // ML
   mlStatus: () => request('/api/ml/status'),
+  mlAppGet: () => request('/api/ml/app'),
+  mlAppSave: (data) => request('/api/ml/app', { method: 'POST', body: JSON.stringify(data) }),
+  mlAppDelete: () => request('/api/ml/app', { method: 'DELETE' }),
 
   // Workspaces
   listWorkspaces: () => request('/api/workspaces'),

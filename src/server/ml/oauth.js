@@ -1,24 +1,58 @@
 /**
- * OAuth do Mercado Livre — agora persistido no Postgres (tabela ml_tokens).
- * Único token global (sua conta de afiliada).
+ * OAuth do Mercado Livre — fluxo authorization_code + refresh_token.
+ *
+ * Credenciais (Client ID, Secret, Redirect URI, tag) vêm do DB
+ * (tabela ml_app_config, gerenciada pelo dashboard).
+ * Fallback pra env vars caso o DB ainda não tenha config — útil pra
+ * primeiro deploy ou rollback.
  */
 import { prisma } from '../db.js';
+import { decrypt } from '../crypto.js';
 
 const TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 const AUTH_URL = 'https://auth.mercadolivre.com.br/authorization';
 
-function env(name) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env ${name}`);
-  return v;
+/**
+ * Retorna config efetiva: DB tem prioridade, fallback pra env.
+ * Lança erro só se nem DB nem env tiverem o necessário.
+ */
+export async function getEffectiveConfig() {
+  const row = await prisma.mlAppConfig.findUnique({ where: { id: 1 } }).catch(() => null);
+  if (row) {
+    return {
+      source: 'db',
+      clientId: row.clientId,
+      clientSecret: decrypt(row.clientSecretEnc),
+      redirectUri: row.redirectUri,
+      affiliateTag: row.affiliateTag ?? process.env.ML_AFFILIATE_TAG ?? null,
+    };
+  }
+  const clientId = process.env.ML_CLIENT_ID;
+  const clientSecret = process.env.ML_CLIENT_SECRET;
+  const redirectUri = process.env.ML_REDIRECT_URI;
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error('App do Mercado Livre não configurado. Vá em Configurações no dashboard.');
+  }
+  return {
+    source: 'env',
+    clientId,
+    clientSecret,
+    redirectUri,
+    affiliateTag: process.env.ML_AFFILIATE_TAG ?? null,
+  };
 }
 
-export function getAuthorizeUrl() {
+export async function isConfigured() {
+  try { await getEffectiveConfig(); return true; }
+  catch { return false; }
+}
+
+export async function getAuthorizeUrl() {
+  const cfg = await getEffectiveConfig();
   const params = new URLSearchParams({
     response_type: 'code',
-    client_id: env('ML_CLIENT_ID'),
-    redirect_uri: env('ML_REDIRECT_URI'),
-    // offline_access garante que o ML devolva refresh_token (token vence em 6h sem isso)
+    client_id: cfg.clientId,
+    redirect_uri: cfg.redirectUri,
     scope: 'offline_access read',
   });
   return `${AUTH_URL}?${params.toString()}`;
@@ -40,12 +74,13 @@ async function persistToken(payload) {
 }
 
 export async function exchangeCodeForToken(code) {
+  const cfg = await getEffectiveConfig();
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
-    client_id: env('ML_CLIENT_ID'),
-    client_secret: env('ML_CLIENT_SECRET'),
+    client_id: cfg.clientId,
+    client_secret: cfg.clientSecret,
     code,
-    redirect_uri: env('ML_REDIRECT_URI'),
+    redirect_uri: cfg.redirectUri,
   });
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
@@ -62,10 +97,11 @@ export async function exchangeCodeForToken(code) {
 }
 
 async function refreshAccessToken(refreshToken) {
+  const cfg = await getEffectiveConfig();
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
-    client_id: env('ML_CLIENT_ID'),
-    client_secret: env('ML_CLIENT_SECRET'),
+    client_id: cfg.clientId,
+    client_secret: cfg.clientSecret,
     refresh_token: refreshToken,
   });
   const res = await fetch(TOKEN_URL, {
@@ -83,11 +119,13 @@ async function refreshAccessToken(refreshToken) {
 }
 
 export async function getMlStatus() {
+  const configured = await isConfigured();
   const token = await prisma.mlToken.findUnique({ where: { id: 1 } });
-  if (!token) return { connected: false };
+  if (!token) return { connected: false, configured };
   const ageSec = (Date.now() - token.obtainedAt.getTime()) / 1000;
   return {
     connected: true,
+    configured,
     userId: token.userId,
     obtainedAt: token.obtainedAt,
     expiresIn: token.expiresIn,
@@ -98,7 +136,7 @@ export async function getMlStatus() {
 export async function getAccessToken() {
   const token = await prisma.mlToken.findUnique({ where: { id: 1 } });
   if (!token) {
-    throw new Error(`ML não autorizado. Acesse ${getAuthorizeUrl()} para autorizar.`);
+    throw new Error('ML não autorizado. Acesse Configurações no dashboard.');
   }
   const ageSec = (Date.now() - token.obtainedAt.getTime()) / 1000;
   if (ageSec >= token.expiresIn - 300) {
@@ -106,4 +144,16 @@ export async function getAccessToken() {
     return refreshed.access_token;
   }
   return token.accessToken;
+}
+
+/**
+ * Retorna a tag de afiliado efetiva (DB tem prioridade, fallback pra env).
+ */
+export async function getAffiliateTag() {
+  try {
+    const cfg = await getEffectiveConfig();
+    return cfg.affiliateTag;
+  } catch {
+    return process.env.ML_AFFILIATE_TAG ?? null;
+  }
 }

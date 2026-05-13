@@ -24,9 +24,11 @@ app.use(cookieParser());
 // API pública
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRouter);
-// Callback OAuth do ML é público (vem do ML); mas /authorize e /status protegidos.
-app.get('/ml/callback', (req, res, next) => mlRouter.handle(Object.assign(req, { url: '/callback' + (req.url.slice('/ml/callback'.length) || '') }), res, next));
-// Endpoints ML protegidos pelo dashboard
+
+// Callback e authorize do ML são públicos (vêm do redirect do ML).
+app.use('/ml', mlPublicRouter);
+
+// Endpoints ML protegidos pelo dashboard (status, app config)
 app.use('/api/ml', authMiddleware, mlRouter);
 
 // API protegida

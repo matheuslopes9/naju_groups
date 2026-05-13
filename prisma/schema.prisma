@@ -101,6 +101,19 @@ model MlToken {
   @@map("ml_tokens")
 }
 
+// Config do App ML Developers (Client ID + Secret encriptado + Redirect URI + tag)
+// Singleton (id=1). Permite gerenciar pelo dashboard ao invés do .env.
+model MlAppConfig {
+  id              Int      @id @default(1)
+  clientId        String   @map("client_id")
+  clientSecretEnc String   @map("client_secret_enc") // AES-256-GCM, base64
+  redirectUri     String   @map("redirect_uri")
+  affiliateTag    String?  @map("affiliate_tag")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("ml_app_config")
+}
+
 // Sessão de auth do dashboard (cookie token → user)
 model AuthSession {
   token     String   @id

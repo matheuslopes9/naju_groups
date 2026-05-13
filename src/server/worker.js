@@ -9,6 +9,7 @@
 import { prisma } from './db.js';
 import { searchOffers } from './ml/search.js';
 import { attachAffiliateTag } from './ml/affiliate.js';
+import { getAffiliateTag } from './ml/oauth.js';
 
 const lastRunMap = new Map(); // workspaceId → timestamp
 
@@ -40,7 +41,7 @@ export async function runWorkspace(ws) {
     limit: 50,
   });
 
-  const affTag = process.env.ML_AFFILIATE_TAG;
+  const affTag = await getAffiliateTag();
   let saved = 0;
 
   for (const o of offers) {

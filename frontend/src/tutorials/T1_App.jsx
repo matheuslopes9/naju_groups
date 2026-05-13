@@ -103,20 +103,28 @@ export default function T1_App() {
         </Callout>
       </Step>
 
-      <Step n={8} title="Colar Client ID e Secret no EasyPanel">
+      <Step n={8} title="Cadastrar dados no dashboard (Configurações)">
         <p>
-          Volta no painel do EasyPanel → seu serviço <strong>bot-whats</strong> →
-          aba <strong>Environment</strong> e atualize:
+          Volta no Naju Groups e abre <strong>Configurações</strong> no menu (ou
+          <a href="/configuracoes" className="text-gradient hover:underline"> clica aqui</a>).
+          Preencha:
         </p>
         <FieldTable rows={[
-          ['ML_CLIENT_ID', 'cole aqui o App ID'],
-          ['ML_CLIENT_SECRET', 'cole aqui o Secret Key'],
-          ['ML_REDIRECT_URI', redirectUri],
-          ['ML_AFFILIATE_TAG', 'najubeautyclub'],
+          ['Client ID', 'cole aqui o App ID'],
+          ['Client Secret', 'cole aqui o Secret Key (será criptografado antes de salvar)'],
+          ['Redirect URI', redirectUri],
+          ['Tag de afiliado', 'najubeautyclub'],
         ]} />
         <p>
-          Salve e clique em <strong>Reimplantar</strong>. O container reinicia em ~30s.
+          Clique em <strong>Salvar</strong>. Os dados ficam armazenados no Postgres
+          (Secret criptografado com AES-256-GCM). Não precisa reimplantar — atualiza
+          em tempo real.
         </p>
+        <Callout tone="info" title="Alternativa: variáveis de ambiente">
+          Você também pode preencher via <code>ML_CLIENT_ID</code>, <code>ML_CLIENT_SECRET</code>,
+          <code> ML_REDIRECT_URI</code> e <code>ML_AFFILIATE_TAG</code> no EasyPanel. O
+          dashboard tem prioridade — se houver config no dashboard, ela vence as envs.
+        </Callout>
       </Step>
 
       <Callout tone="success" title="Pronto pra próxima etapa">
