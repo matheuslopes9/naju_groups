@@ -1,10 +1,19 @@
 /**
  * Gerenciador de múltiplas sessões WhatsApp (uma por workspace).
  *
- * Cada sessão:
- *  - Diretório de credenciais: /app/auth_state/wa/<workspaceId>/
- *  - Estado em memória: socket, último QR, status
- *  - Eventos emitidos via EventEmitter → consumidos por WebSocket
+ * Status possíveis:
+ *  - disconnected: nunca conectou ou desconectou explicitamente
+ *  - qr:           aguardando scan
+ *  - connecting:   conectando ou reconectando
+ *  - connected:    conectado e pronto
+ *  - conflict:     PARADO porque outro aparelho está usando o mesmo número
+ *                  (não tenta reconectar — exige ação manual)
+ *  - paused:       PARADO por escolha do usuário (botão Pausar)
+ *
+ * Reconexão automática:
+ *  - Acontece em close NORMAL (não loggedOut, não conflict, não paused)
+ *  - Backoff exponencial: 3s → 6s → 12s → 24s → 48s → max 60s
+ *  - Estado reseta a cada conexão bem-sucedida
  */
 import {
   default as makeWASocket,
@@ -23,7 +32,7 @@ const logger = pino({ level: 'warn' });
 class WhatsappManager extends EventEmitter {
   constructor() {
     super();
-    this.sessions = new Map(); // workspaceId → { sock, qrDataUrl, status, phoneNumber }
+    this.sessions = new Map(); // workspaceId → { sock, qrDataUrl, status, phoneNumber, retryCount, reconnectTimer }
   }
 
   authStatePath(workspaceId) {
@@ -34,20 +43,57 @@ class WhatsappManager extends EventEmitter {
     return this.sessions.get(workspaceId) ?? null;
   }
 
-  getStatus(workspaceId) {
+  async getStatus(workspaceId) {
     const s = this.sessions.get(workspaceId);
-    if (!s) return { status: 'disconnected', qrDataUrl: null, phoneNumber: null };
+    if (s) {
+      return {
+        status: s.status,
+        qrDataUrl: s.qrDataUrl,
+        phoneNumber: s.phoneNumber,
+      };
+    }
+    // sem sessão em memória — consulta DB
+    const row = await prisma.whatsappSession.findUnique({ where: { workspaceId } }).catch(() => null);
     return {
-      status: s.status,
-      qrDataUrl: s.qrDataUrl,
-      phoneNumber: s.phoneNumber,
+      status: row?.status ?? 'disconnected',
+      qrDataUrl: null,
+      phoneNumber: row?.phoneNumber ?? null,
     };
   }
 
-  async start(workspaceId) {
-    if (this.sessions.has(workspaceId)) {
-      const existing = this.sessions.get(workspaceId);
+  /**
+   * Status síncrono (apenas memória). Mantido pra compatibilidade do código atual.
+   */
+  getStatusSync(workspaceId) {
+    const s = this.sessions.get(workspaceId);
+    if (!s) return { status: 'disconnected', qrDataUrl: null, phoneNumber: null };
+    return { status: s.status, qrDataUrl: s.qrDataUrl, phoneNumber: s.phoneNumber };
+  }
+
+  /**
+   * Inicia ou reconecta a sessão. Se `force=true`, ignora status conflict/paused
+   * (usado quando o usuário clica em Conectar pelo dashboard).
+   */
+  async start(workspaceId, { force = false } = {}) {
+    const existing = this.sessions.get(workspaceId);
+    if (existing) {
       if (existing.status === 'connected') return existing;
+      if (!force && (existing.status === 'conflict' || existing.status === 'paused')) {
+        return existing;
+      }
+    }
+
+    // Se DB diz que está em conflict/paused e não é força, não inicia
+    if (!force) {
+      const row = await prisma.whatsappSession.findUnique({ where: { workspaceId } }).catch(() => null);
+      if (row && (row.status === 'conflict' || row.status === 'paused')) {
+        return null;
+      }
+    }
+
+    // Limpa timer de reconexão pendente (caso force=true tenha sido chamado durante backoff)
+    if (existing?.reconnectTimer) {
+      clearTimeout(existing.reconnectTimer);
     }
 
     const { state, saveCreds } = await useMultiFileAuthState(this.authStatePath(workspaceId));
@@ -59,6 +105,9 @@ class WhatsappManager extends EventEmitter {
       logger,
       printQRInTerminal: false,
       browser: ['NajuGroups', 'Chrome', '1.0'],
+      // não baixa histórico de mensagens (mais leve, evita timeouts no init)
+      syncFullHistory: false,
+      shouldSyncHistoryMessage: () => false,
     });
 
     const session = {
@@ -67,6 +116,8 @@ class WhatsappManager extends EventEmitter {
       status: 'connecting',
       phoneNumber: null,
       workspaceId,
+      retryCount: existing?.retryCount ?? 0,
+      reconnectTimer: null,
     };
     this.sessions.set(workspaceId, session);
 
@@ -83,20 +134,60 @@ class WhatsappManager extends EventEmitter {
       }
 
       if (connection === 'close') {
-        const code = lastDisconnect?.error?.output?.statusCode;
+        const err = lastDisconnect?.error;
+        const code = err?.output?.statusCode;
+        const errMessage = err?.message ?? '';
+        const isConflict =
+          errMessage.includes('replaced') ||
+          errMessage.includes('conflict') ||
+          code === 440 ||
+          code === DisconnectReason.connectionReplaced;
         const loggedOut = code === DisconnectReason.loggedOut;
-        session.status = loggedOut ? 'disconnected' : 'connecting';
+
+        // Decisão de reconexão
+        let nextStatus;
+        let willReconnect = false;
+
+        if (loggedOut) {
+          nextStatus = 'disconnected';
+        } else if (isConflict) {
+          nextStatus = 'conflict';
+          console.warn(`⚠️ [${workspaceId}] WhatsApp em conflito — outro aparelho usando o mesmo número. Não reconectando automaticamente.`);
+        } else {
+          // Reconnect com backoff exponencial
+          nextStatus = 'connecting';
+          willReconnect = true;
+        }
+
+        session.status = nextStatus;
         session.qrDataUrl = null;
-        await this.persistStatus(workspaceId, session.status);
-        this.emit('update', { workspaceId, status: session.status });
+        await this.persistStatus(workspaceId, nextStatus);
+        this.emit('update', { workspaceId, status: nextStatus });
+
+        // Remove a sessão antiga
         this.sessions.delete(workspaceId);
-        if (!loggedOut) {
-          setTimeout(() => this.start(workspaceId).catch(() => {}), 3000);
+
+        if (willReconnect) {
+          const retry = (existing?.retryCount ?? 0) + 1;
+          const delayMs = Math.min(60_000, 3000 * Math.pow(2, Math.min(retry - 1, 5)));
+          console.log(`🔄 [${workspaceId}] Reconectando em ${delayMs}ms (tentativa ${retry})`);
+          const timer = setTimeout(() => {
+            this.start(workspaceId).catch((e) => console.warn('reconnect failed:', e.message));
+          }, delayMs);
+          // Guarda em uma sessão "fantasma" só pra clearable
+          this.sessions.set(workspaceId, {
+            ...session,
+            sock: null,
+            status: 'connecting',
+            retryCount: retry,
+            reconnectTimer: timer,
+          });
         }
       } else if (connection === 'open') {
         session.status = 'connected';
         session.qrDataUrl = null;
         session.phoneNumber = sock.user?.id?.split(':')[0] ?? null;
+        session.retryCount = 0; // reseta backoff em sucesso
         await this.persistStatus(workspaceId, 'connected', session.phoneNumber);
         this.emit('update', { workspaceId, status: 'connected', phoneNumber: session.phoneNumber });
       }
@@ -107,11 +198,35 @@ class WhatsappManager extends EventEmitter {
 
   async stop(workspaceId) {
     const s = this.sessions.get(workspaceId);
-    if (!s) return;
-    try { await s.sock.logout(); } catch {}
+    if (s?.reconnectTimer) clearTimeout(s.reconnectTimer);
+    if (s?.sock) {
+      try { await s.sock.logout(); } catch {}
+    }
     this.sessions.delete(workspaceId);
     await this.persistStatus(workspaceId, 'disconnected');
     this.emit('update', { workspaceId, status: 'disconnected' });
+  }
+
+  /**
+   * Pausa: não desloga, só impede reconexões automáticas até o usuário religar.
+   * Útil quando há conflict frequente e o usuário quer parar de tentar.
+   */
+  async pause(workspaceId) {
+    const s = this.sessions.get(workspaceId);
+    if (s?.reconnectTimer) clearTimeout(s.reconnectTimer);
+    if (s?.sock) {
+      try { await s.sock.ws?.close(); } catch {}
+    }
+    this.sessions.delete(workspaceId);
+    await this.persistStatus(workspaceId, 'paused');
+    this.emit('update', { workspaceId, status: 'paused' });
+  }
+
+  /**
+   * Reseta o status de conflict/paused e tenta conectar de novo.
+   */
+  async resume(workspaceId) {
+    return this.start(workspaceId, { force: true });
   }
 
   async persistStatus(workspaceId, status, phoneNumber) {
@@ -125,12 +240,12 @@ class WhatsappManager extends EventEmitter {
       where: { workspaceId },
       create: { workspaceId, ...data },
       update: data,
-    });
+    }).catch((e) => console.warn('persistStatus failed:', e.message));
   }
 
   async listGroups(workspaceId) {
     const s = this.sessions.get(workspaceId);
-    if (!s || s.status !== 'connected') {
+    if (!s?.sock || s.status !== 'connected') {
       throw new Error('WhatsApp não conectado neste workspace');
     }
     const groups = await s.sock.groupFetchAllParticipating();
@@ -143,7 +258,7 @@ class WhatsappManager extends EventEmitter {
 
   async sendMessage(workspaceId, jid, { text, image, caption }) {
     const s = this.sessions.get(workspaceId);
-    if (!s || s.status !== 'connected') {
+    if (!s?.sock || s.status !== 'connected') {
       throw new Error('WhatsApp não conectado');
     }
     const payload = image
@@ -153,7 +268,8 @@ class WhatsappManager extends EventEmitter {
   }
 
   async restoreAll() {
-    // Restaura sessões previamente conectadas (após reinício do app).
+    // Só restaura sessões que estavam connected. Conflict/paused/disconnected
+    // ficam parados aguardando ação manual.
     const sessions = await prisma.whatsappSession.findMany({
       where: { status: 'connected' },
       select: { workspaceId: true },

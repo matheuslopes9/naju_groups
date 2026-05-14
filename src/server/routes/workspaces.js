@@ -81,7 +81,7 @@ router.get('/', async (_req, res) => {
   });
   const enriched = items.map((w) => ({
     ...w,
-    wa: waManager.getStatus(w.id),
+    wa: waManager.getStatusSync(w.id),
   }));
   res.json(enriched);
 });
@@ -111,7 +111,7 @@ router.get('/:id', async (req, res) => {
     include: { whatsappSession: true, groups: true },
   });
   if (!ws) return res.status(404).json({ error: 'not found' });
-  res.json({ ...ws, wa: waManager.getStatus(ws.id) });
+  res.json({ ...ws, wa: waManager.getStatusSync(ws.id) });
 });
 
 router.patch('/:id', async (req, res) => {
@@ -133,7 +133,7 @@ router.delete('/:id', async (req, res) => {
 router.post('/:id/whatsapp/connect', async (req, res) => {
   await waManager.start(req.params.id);
   audit('wa.connect', { entity: 'wa', workspaceId: req.params.id });
-  res.json({ ok: true, status: waManager.getStatus(req.params.id) });
+  res.json({ ok: true, status: waManager.getStatusSync(req.params.id) });
 });
 
 router.post('/:id/whatsapp/disconnect', async (req, res) => {
@@ -142,8 +142,20 @@ router.post('/:id/whatsapp/disconnect', async (req, res) => {
   res.json({ ok: true });
 });
 
-router.get('/:id/whatsapp/status', (req, res) => {
-  res.json(waManager.getStatus(req.params.id));
+router.post('/:id/whatsapp/pause', async (req, res) => {
+  await waManager.pause(req.params.id);
+  audit('wa.pause', { entity: 'wa', workspaceId: req.params.id });
+  res.json({ ok: true });
+});
+
+router.post('/:id/whatsapp/resume', async (req, res) => {
+  await waManager.resume(req.params.id);
+  audit('wa.resume', { entity: 'wa', workspaceId: req.params.id });
+  res.json({ ok: true, status: waManager.getStatusSync(req.params.id) });
+});
+
+router.get('/:id/whatsapp/status', async (req, res) => {
+  res.json(await waManager.getStatus(req.params.id));
 });
 
 router.get('/:id/whatsapp/groups', async (req, res) => {
