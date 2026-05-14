@@ -63,6 +63,7 @@ export const api = {
 
   // Offers
   searchNow: (id) => request(`/api/workspaces/${id}/search`, { method: 'POST' }),
+  addOfferByUrl: (id, url) => request(`/api/workspaces/${id}/offers/add-by-url`, { method: 'POST', body: JSON.stringify({ url }) }),
   listOffers: (id, status = 'pending') => request(`/api/workspaces/${id}/offers?status=${status}`),
   approveOffer: (id, oid) => request(`/api/workspaces/${id}/offers/${oid}/approve`, { method: 'POST' }),
   rejectOffer: (id, oid) => request(`/api/workspaces/${id}/offers/${oid}/reject`, { method: 'POST' }),

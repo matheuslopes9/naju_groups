@@ -14,6 +14,8 @@ export default function OffersPanel({ ws }) {
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [manualUrl, setManualUrl] = useState('');
+  const [addingUrl, setAddingUrl] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -34,6 +36,20 @@ export default function OffersPanel({ ws }) {
     } finally { setSearching(false); }
   }
 
+  async function addByUrl() {
+    if (!manualUrl.trim()) return;
+    setAddingUrl(true);
+    try {
+      await api.addOfferByUrl(ws.id, manualUrl.trim());
+      toast.success('Oferta adicionada com sucesso');
+      setManualUrl('');
+      setTab('pending');
+      load();
+    } catch (e) {
+      toast.error(e.message);
+    } finally { setAddingUrl(false); }
+  }
+
   async function approve(oid) {
     try {
       await api.approveOffer(ws.id, oid);
@@ -49,6 +65,31 @@ export default function OffersPanel({ ws }) {
 
   return (
     <div className="space-y-4">
+      {/* Adicionar oferta colando URL */}
+      <div className="card">
+        <h3 className="font-semibold flex items-center gap-2 mb-2">
+          <Icon.Plus /> Adicionar oferta por URL
+        </h3>
+        <p className="text-xs mb-3" style={{ color: 'rgb(var(--text-muted))' }}>
+          Cole o link de um produto do Mercado Livre que você quer divulgar. O sistema extrai os
+          dados, anexa sua tag de afiliado e adiciona às pendentes pra você revisar.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            value={manualUrl}
+            onChange={(e) => setManualUrl(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addByUrl()}
+            placeholder="https://produto.mercadolivre.com.br/MLB-..."
+            className="input flex-1 font-mono text-xs"
+            disabled={addingUrl}
+          />
+          <button onClick={addByUrl} disabled={addingUrl || !manualUrl.trim()} className="btn btn-primary !text-xs whitespace-nowrap">
+            {addingUrl ? <Icon.Loader width={14} height={14} /> : <Icon.Plus width={14} height={14} />}
+            Adicionar
+          </button>
+        </div>
+      </div>
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="glass rounded-xl p-1 flex gap-1 overflow-x-auto">
           {TABS.map((t) => {
@@ -68,7 +109,7 @@ export default function OffersPanel({ ws }) {
         </div>
         <button onClick={searchNow} disabled={searching} className="btn btn-secondary">
           {searching ? <Icon.Loader width={14} height={14} /> : <Icon.Search width={14} height={14} />}
-          {searching ? 'Buscando…' : 'Buscar agora'}
+          {searching ? 'Buscando…' : 'Buscar automaticamente'}
         </button>
       </div>
 

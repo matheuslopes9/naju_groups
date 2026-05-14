@@ -5,6 +5,9 @@ import { formatOffer } from '../formatter.js';
 import { runWorkspace } from '../worker.js';
 import { audit } from '../audit.js';
 import { MLB_CATEGORIES, findCategory } from '../ml/categories.js';
+import { fetchItemByUrl } from '../ml/scraper.js';
+import { attachAffiliateTag } from '../ml/affiliate.js';
+import { getAffiliateTag } from '../ml/oauth.js';
 
 const router = Router();
 
@@ -243,6 +246,42 @@ router.delete('/:id/categories/:rowId', async (req, res) => {
   await prisma.workspaceCategory.delete({ where: { id: req.params.rowId } });
   audit('category.remove', { entity: 'category', entityId: req.params.rowId, workspaceId: req.params.id });
   res.json({ ok: true });
+});
+
+// Adicionar oferta MANUAL via URL colada (escape do bloqueio da API ML)
+router.post('/:id/offers/add-by-url', async (req, res) => {
+  const { url } = req.body ?? {};
+  if (!url) return res.status(400).json({ error: 'URL obrigatória' });
+  try {
+    const o = await fetchItemByUrl(url);
+    const affTag = await getAffiliateTag();
+    const affiliateUrl = attachAffiliateTag(o.permalink, affTag);
+    const offer = await prisma.offer.create({
+      data: {
+        workspaceId: req.params.id,
+        productId: o.productId,
+        title: o.title,
+        price: o.price,
+        originalPrice: o.originalPrice,
+        discountPercent: o.discountPercent,
+        currency: o.currency,
+        permalink: o.permalink,
+        affiliateUrl,
+        imageUrl: o.image,
+        freeShipping: o.freeShipping,
+        condition: o.condition,
+        soldQuantity: o.soldQuantity,
+        status: 'pending',
+      },
+    });
+    audit('offer.add_manual', { entity: 'offer', entityId: offer.id, workspaceId: req.params.id });
+    res.status(201).json(offer);
+  } catch (e) {
+    if (e.code === 'P2002') {
+      return res.status(409).json({ error: 'Esta oferta já foi adicionada (mesmo produto)' });
+    }
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // Buscar ofertas agora (manual)

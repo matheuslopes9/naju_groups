@@ -1,12 +1,15 @@
 /**
  * Worker em loop: a cada minuto verifica workspaces com auto_search=true.
- * Para cada workspace, itera sobre as CATEGORIAS cadastradas e chama
- * /sites/MLB/search?category=$ID&shipping_cost=free
+ *
+ * IMPORTANTE: desde abril/2025 o ML bloqueou /sites/MLB/search publicamente.
+ * Esta plataforma agora usa SCRAPING da página pública /ofertas pra coletar
+ * ofertas em destaque por categoria. Volume baixo (1 fetch por categoria por
+ * intervalMin), User-Agent rotativo, delay aleatório — risco calculado.
  *
  * Política: nada vai a grupo automaticamente. Ofertas viram pending.
  */
 import { prisma } from './db.js';
-import { searchOffersByCategory } from './ml/search.js';
+import { scrapeOffers } from './ml/scraper.js';
 import { attachAffiliateTag } from './ml/affiliate.js';
 import { getAffiliateTag } from './ml/oauth.js';
 
@@ -39,21 +42,18 @@ export async function runWorkspace(ws) {
     return 0;
   }
 
-  console.log(`🔍 Buscando ofertas para workspace="${ws.name}" (${categories.length} categoria(s))`);
+  console.log(`🔍 Buscando ofertas para workspace="${ws.name}" (${categories.length} categoria(s)) via scraping`);
   const affTag = await getAffiliateTag();
   let saved = 0;
 
   for (const cat of categories) {
     try {
-      const offers = await searchOffersByCategory(cat.categoryId, {
-        freeShipping: ws.onlyFreeShipping,
-        sort: 'price_asc',
-        limit: 50,
-      });
+      const offers = await scrapeOffers(cat.categoryId);
+      console.log(`   ${cat.name}: ${offers.length} ofertas brutas`);
 
       for (const o of offers) {
         if (o.discountPercent < ws.minDiscount) continue;
-        // "Só promoções": exige original_price (item em deal)
+        if (ws.onlyFreeShipping && !o.freeShipping) continue;
         if (ws.onlyDeals && !o.originalPrice) continue;
 
         const affiliateUrl = attachAffiliateTag(o.permalink, affTag);
@@ -78,7 +78,7 @@ export async function runWorkspace(ws) {
           });
           saved++;
         } catch {
-          // duplicata
+          // duplicata (workspaceId+productId)
         }
       }
     } catch (e) {
