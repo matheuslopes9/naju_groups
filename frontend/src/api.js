@@ -54,12 +54,12 @@ export const api = {
   addGroup: (id, data) => request(`/api/workspaces/${id}/groups`, { method: 'POST', body: JSON.stringify(data) }),
   deleteGroup: (id, gid) => request(`/api/workspaces/${id}/groups/${gid}`, { method: 'DELETE' }),
 
-  // Sellers (monitorados)
-  listSellers: (id) => request(`/api/workspaces/${id}/sellers`),
-  lookupSeller: (id, nickname) => request(`/api/workspaces/${id}/sellers/lookup`, { method: 'POST', body: JSON.stringify({ nickname }) }),
-  addSeller: (id, data) => request(`/api/workspaces/${id}/sellers`, { method: 'POST', body: JSON.stringify(data) }),
-  toggleSeller: (id, sid, enabled) => request(`/api/workspaces/${id}/sellers/${sid}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
-  deleteSeller: (id, sid) => request(`/api/workspaces/${id}/sellers/${sid}`, { method: 'DELETE' }),
+  // Categorias monitoradas
+  mlCategories: () => request('/api/workspaces/ml/categories'),
+  listCategories: (id) => request(`/api/workspaces/${id}/categories`),
+  addCategory: (id, categoryId) => request(`/api/workspaces/${id}/categories`, { method: 'POST', body: JSON.stringify({ categoryId }) }),
+  toggleCategory: (id, rowId, enabled) => request(`/api/workspaces/${id}/categories/${rowId}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
+  deleteCategory: (id, rowId) => request(`/api/workspaces/${id}/categories/${rowId}`, { method: 'DELETE' }),
 
   // Offers
   searchNow: (id) => request(`/api/workspaces/${id}/search`, { method: 'POST' }),

@@ -4,7 +4,7 @@ import { waManager } from '../whatsapp/manager.js';
 import { formatOffer } from '../formatter.js';
 import { runWorkspace } from '../worker.js';
 import { audit } from '../audit.js';
-import { lookupSellerByNickname } from '../ml/search.js';
+import { MLB_CATEGORIES, findCategory } from '../ml/categories.js';
 
 const router = Router();
 
@@ -192,70 +192,56 @@ router.delete('/:id/groups/:groupId', async (req, res) => {
   res.json({ ok: true });
 });
 
-// ---- Sellers monitorados pelo workspace ----
+// ---- Categorias monitoradas pelo workspace ----
 
-router.get('/:id/sellers', async (req, res) => {
-  const sellers = await prisma.workspaceSeller.findMany({
+// Lista as 30+ categorias top-level disponíveis no MLB
+router.get('/ml/categories', async (_req, res) => {
+  res.json(MLB_CATEGORIES);
+});
+
+router.get('/:id/categories', async (req, res) => {
+  const rows = await prisma.workspaceCategory.findMany({
     where: { workspaceId: req.params.id },
     orderBy: { createdAt: 'desc' },
   });
-  res.json(sellers);
+  res.json(rows);
 });
 
-router.post('/:id/sellers/lookup', async (req, res) => {
-  const { nickname } = req.body ?? {};
-  if (!nickname) return res.status(400).json({ error: 'nickname obrigatório' });
+router.post('/:id/categories', async (req, res) => {
+  const { categoryId } = req.body ?? {};
+  if (!categoryId) return res.status(400).json({ error: 'categoryId obrigatório' });
+  const cat = findCategory(categoryId);
+  if (!cat) return res.status(400).json({ error: 'Categoria desconhecida' });
   try {
-    const info = await lookupSellerByNickname(nickname);
-    res.json(info);
-  } catch (e) {
-    res.status(404).json({ error: e.message });
-  }
-});
-
-router.post('/:id/sellers', async (req, res) => {
-  const { nickname, sellerId } = req.body ?? {};
-  if (!nickname && !sellerId) {
-    return res.status(400).json({ error: 'nickname ou sellerId obrigatório' });
-  }
-  try {
-    let info;
-    if (sellerId) {
-      info = { sellerId: String(sellerId), nickname: nickname ?? null };
-    } else {
-      info = await lookupSellerByNickname(nickname);
-    }
-    const saved = await prisma.workspaceSeller.create({
+    const saved = await prisma.workspaceCategory.create({
       data: {
         workspaceId: req.params.id,
-        sellerId: info.sellerId,
-        nickname: info.nickname,
+        categoryId: cat.id,
+        name: cat.name,
       },
     });
-    audit('seller.add', { entity: 'seller', entityId: saved.id, workspaceId: req.params.id, payload: { nickname: info.nickname } });
+    audit('category.add', { entity: 'category', entityId: saved.id, workspaceId: req.params.id, payload: { name: cat.name } });
     res.status(201).json(saved);
   } catch (e) {
-    if (e.code === 'P2002') {
-      return res.status(409).json({ error: 'Seller já cadastrado neste workspace' });
-    }
+    if (e.code === 'P2002') return res.status(409).json({ error: 'Categoria já cadastrada' });
     res.status(400).json({ error: e.message });
   }
 });
 
-router.patch('/:id/sellers/:sellerRowId', async (req, res) => {
+router.patch('/:id/categories/:rowId', async (req, res) => {
   const { enabled } = req.body ?? {};
   const data = {};
   if (typeof enabled === 'boolean') data.enabled = enabled;
-  const seller = await prisma.workspaceSeller.update({
-    where: { id: req.params.sellerRowId },
+  const row = await prisma.workspaceCategory.update({
+    where: { id: req.params.rowId },
     data,
   });
-  res.json(seller);
+  res.json(row);
 });
 
-router.delete('/:id/sellers/:sellerRowId', async (req, res) => {
-  await prisma.workspaceSeller.delete({ where: { id: req.params.sellerRowId } });
-  audit('seller.remove', { entity: 'seller', entityId: req.params.sellerRowId, workspaceId: req.params.id });
+router.delete('/:id/categories/:rowId', async (req, res) => {
+  await prisma.workspaceCategory.delete({ where: { id: req.params.rowId } });
+  audit('category.remove', { entity: 'category', entityId: req.params.rowId, workspaceId: req.params.id });
   res.json({ ok: true });
 });
 
