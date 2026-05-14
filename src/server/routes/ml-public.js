@@ -30,9 +30,10 @@ router.get('/authorize', async (_req, res) => {
 
 router.get('/callback', async (req, res) => {
   const code = req.query.code;
+  const state = req.query.state;
   if (!code) return res.status(400).send('Faltou ?code= na URL.');
   try {
-    await exchangeCodeForToken(String(code));
+    await exchangeCodeForToken(String(code), state ? String(state) : undefined);
     audit('ml.authorize', { entity: 'ml' });
     res.type('html').send(`
       <html><body style="font-family:sans-serif;padding:40px;text-align:center;background:#0b1020;color:#e2e8f0">

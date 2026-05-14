@@ -1,21 +1,50 @@
 /**
- * OAuth do Mercado Livre — fluxo authorization_code + refresh_token.
+ * OAuth do Mercado Livre — fluxo authorization_code + refresh_token com PKCE.
  *
- * Credenciais (Client ID, Secret, Redirect URI, tag) vêm do DB
- * (tabela ml_app_config, gerenciada pelo dashboard).
- * Fallback pra env vars caso o DB ainda não tenha config — útil pra
- * primeiro deploy ou rollback.
+ * O ML exige PKCE (RFC 7636) na troca do code por token:
+ *  - code_verifier: 43-128 chars aleatórios (gerado antes do authorize)
+ *  - code_challenge: SHA256(code_verifier), base64url, enviado na authorize
+ *  - state: id correlacionando os dois lados (evita CSRF + indexa o verifier)
+ *
+ * O verifier é mantido em memória (Map keyed pelo state) com TTL de 10 min.
+ * Não precisa persistir em DB — o ciclo é authorize → callback em segundos.
  */
+import crypto from 'node:crypto';
 import { prisma } from '../db.js';
 import { decrypt } from '../crypto.js';
 
 const TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 const AUTH_URL = 'https://auth.mercadolivre.com.br/authorization';
+const PKCE_TTL_MS = 10 * 60 * 1000;
 
-/**
- * Retorna config efetiva: DB tem prioridade, fallback pra env.
- * Lança erro só se nem DB nem env tiverem o necessário.
- */
+// state → { codeVerifier, expiresAt }
+const pkceStore = new Map();
+
+function generateCodeVerifier() {
+  // 64 bytes aleatórios → base64url ~86 chars (dentro do limite 43-128)
+  return crypto.randomBytes(64).toString('base64url');
+}
+
+function codeChallengeFor(verifier) {
+  return crypto.createHash('sha256').update(verifier).digest('base64url');
+}
+
+function rememberVerifier(state, codeVerifier) {
+  pkceStore.set(state, { codeVerifier, expiresAt: Date.now() + PKCE_TTL_MS });
+  // Limpa expirados oportunisticamente
+  for (const [k, v] of pkceStore) {
+    if (v.expiresAt < Date.now()) pkceStore.delete(k);
+  }
+}
+
+function takeVerifier(state) {
+  const entry = pkceStore.get(state);
+  if (!entry) return null;
+  pkceStore.delete(state);
+  if (entry.expiresAt < Date.now()) return null;
+  return entry.codeVerifier;
+}
+
 export async function getEffectiveConfig() {
   const row = await prisma.mlAppConfig.findUnique({ where: { id: 1 } }).catch(() => null);
   if (row) {
@@ -47,13 +76,26 @@ export async function isConfigured() {
   catch { return false; }
 }
 
+/**
+ * Gera URL de autorização com PKCE.
+ * Retorna a URL + o state (que é usado como chave do verifier).
+ * O caller redireciona o browser pra essa URL.
+ */
 export async function getAuthorizeUrl() {
   const cfg = await getEffectiveConfig();
+  const state = crypto.randomBytes(16).toString('hex');
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = codeChallengeFor(codeVerifier);
+  rememberVerifier(state, codeVerifier);
+
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: cfg.clientId,
     redirect_uri: cfg.redirectUri,
     scope: 'offline_access read',
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
   });
   return `${AUTH_URL}?${params.toString()}`;
 }
@@ -73,8 +115,14 @@ async function persistToken(payload) {
   });
 }
 
-export async function exchangeCodeForToken(code) {
+/**
+ * Troca o code recebido no callback por access_token.
+ * Precisa do state (vem na query string do callback) pra recuperar o code_verifier.
+ */
+export async function exchangeCodeForToken(code, state) {
   const cfg = await getEffectiveConfig();
+  const codeVerifier = state ? takeVerifier(state) : null;
+
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     client_id: cfg.clientId,
@@ -82,6 +130,10 @@ export async function exchangeCodeForToken(code) {
     code,
     redirect_uri: cfg.redirectUri,
   });
+  if (codeVerifier) {
+    body.set('code_verifier', codeVerifier);
+  }
+
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
@@ -89,7 +141,10 @@ export async function exchangeCodeForToken(code) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`exchangeCode failed: ${res.status} ${text}`);
+    const hint = !codeVerifier
+      ? ' (DICA: code_verifier não foi recuperado — sessão PKCE expirou ou state ausente. Reinicie a autorização.)'
+      : '';
+    throw new Error(`exchangeCode failed: ${res.status} ${text}${hint}`);
   }
   const payload = await res.json();
   await persistToken(payload);
@@ -146,9 +201,6 @@ export async function getAccessToken() {
   return token.accessToken;
 }
 
-/**
- * Retorna a tag de afiliado efetiva (DB tem prioridade, fallback pra env).
- */
 export async function getAffiliateTag() {
   try {
     const cfg = await getEffectiveConfig();
