@@ -54,6 +54,13 @@ export const api = {
   addGroup: (id, data) => request(`/api/workspaces/${id}/groups`, { method: 'POST', body: JSON.stringify(data) }),
   deleteGroup: (id, gid) => request(`/api/workspaces/${id}/groups/${gid}`, { method: 'DELETE' }),
 
+  // Sellers (monitorados)
+  listSellers: (id) => request(`/api/workspaces/${id}/sellers`),
+  lookupSeller: (id, nickname) => request(`/api/workspaces/${id}/sellers/lookup`, { method: 'POST', body: JSON.stringify({ nickname }) }),
+  addSeller: (id, data) => request(`/api/workspaces/${id}/sellers`, { method: 'POST', body: JSON.stringify(data) }),
+  toggleSeller: (id, sid, enabled) => request(`/api/workspaces/${id}/sellers/${sid}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
+  deleteSeller: (id, sid) => request(`/api/workspaces/${id}/sellers/${sid}`, { method: 'DELETE' }),
+
   // Offers
   searchNow: (id) => request(`/api/workspaces/${id}/search`, { method: 'POST' }),
   listOffers: (id, status = 'pending') => request(`/api/workspaces/${id}/offers?status=${status}`),

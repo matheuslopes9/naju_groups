@@ -28,8 +28,24 @@ model Workspace {
   whatsappSession WhatsappSession?
   groups          Group[]
   offers          Offer[]
+  sellers         WorkspaceSeller[]
 
   @@map("workspaces")
+}
+
+// Sellers (vendedores ML) que o workspace monitora.
+// O bot busca anúncios desses sellers via GET /sites/MLB/search?seller_id=...
+model WorkspaceSeller {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sellerId    String   @map("seller_id")
+  nickname    String?
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([workspaceId, sellerId])
+  @@map("workspace_sellers")
 }
 
 model WhatsappSession {

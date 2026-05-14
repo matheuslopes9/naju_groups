@@ -2,12 +2,15 @@
  * Worker em loop: a cada minuto verifica workspaces com auto_search=true
  * e busca novas ofertas (respeitando intervalMin do workspace).
  *
- * Política de conformidade: bot NÃO posta no grupo automaticamente.
- * Ofertas vão como "pending" pro inbox — você aprova/rejeita pelo dashboard,
- * a partir daí ele envia ao grupo de STAGING (não ao público).
+ * Para cada workspace, itera sobre os SELLERS cadastrados e chama
+ * /sites/MLB/search?seller_id=... — o endpoint /sites/MLB/search?q= não
+ * funciona (não é documentado oficialmente para esse uso).
+ *
+ * Política de conformidade: nada vai a grupo automaticamente.
+ * Ofertas viram "pending" — usuário aprova/rejeita pelo dashboard.
  */
 import { prisma } from './db.js';
-import { searchOffers } from './ml/search.js';
+import { searchOffersBySeller } from './ml/search.js';
 import { attachAffiliateTag } from './ml/affiliate.js';
 import { getAffiliateTag } from './ml/oauth.js';
 
@@ -15,7 +18,6 @@ const lastRunMap = new Map(); // workspaceId → timestamp
 
 export function startWorker() {
   setInterval(runOnce, 60_000);
-  // Roda imediatamente também
   setTimeout(runOnce, 5_000);
   console.log('🔄 Worker de busca de ofertas iniciado (tick=60s)');
 }
@@ -32,45 +34,62 @@ async function runOnce() {
 }
 
 export async function runWorkspace(ws) {
-  console.log(`🔍 Buscando ofertas para workspace="${ws.name}"`);
-  const offers = await searchOffers({
-    q: ws.searchQuery || undefined,
-    freeShipping: ws.onlyFreeShipping,
-    deal: ws.onlyDeals,
-    sort: 'price_asc',
-    limit: 50,
+  const sellers = await prisma.workspaceSeller.findMany({
+    where: { workspaceId: ws.id, enabled: true },
   });
 
+  if (sellers.length === 0) {
+    console.log(`⚠️  Workspace "${ws.name}" sem sellers cadastrados — pulando`);
+    return 0;
+  }
+
+  console.log(`🔍 Buscando ofertas para workspace="${ws.name}" (${sellers.length} seller(s))`);
   const affTag = await getAffiliateTag();
   let saved = 0;
 
-  for (const o of offers) {
-    if (o.discountPercent < ws.minDiscount) continue;
-    const affiliateUrl = attachAffiliateTag(o.permalink, affTag);
+  for (const seller of sellers) {
     try {
-      await prisma.offer.create({
-        data: {
-          workspaceId: ws.id,
-          productId: o.productId,
-          title: o.title,
-          price: o.price,
-          originalPrice: o.originalPrice,
-          discountPercent: o.discountPercent,
-          currency: o.currency,
-          permalink: o.permalink,
-          affiliateUrl,
-          imageUrl: o.image,
-          freeShipping: o.freeShipping,
-          condition: o.condition,
-          soldQuantity: o.soldQuantity,
-          status: 'pending',
-        },
+      const offers = await searchOffersBySeller(seller.sellerId, {
+        freeShipping: ws.onlyFreeShipping,
+        sort: 'price_asc',
+        limit: 50,
       });
-      saved++;
-    } catch {
-      // duplicata (unique workspaceId+productId)
+
+      for (const o of offers) {
+        if (o.discountPercent < ws.minDiscount) continue;
+        // Filtro extra "só promoções": exige que tenha original_price (item em deal)
+        if (ws.onlyDeals && !o.originalPrice) continue;
+
+        const affiliateUrl = attachAffiliateTag(o.permalink, affTag);
+        try {
+          await prisma.offer.create({
+            data: {
+              workspaceId: ws.id,
+              productId: o.productId,
+              title: o.title,
+              price: o.price,
+              originalPrice: o.originalPrice,
+              discountPercent: o.discountPercent,
+              currency: o.currency,
+              permalink: o.permalink,
+              affiliateUrl,
+              imageUrl: o.image,
+              freeShipping: o.freeShipping,
+              condition: o.condition,
+              soldQuantity: o.soldQuantity,
+              status: 'pending',
+            },
+          });
+          saved++;
+        } catch {
+          // duplicata (unique workspaceId+productId)
+        }
+      }
+    } catch (e) {
+      console.warn(`   seller ${seller.nickname ?? seller.sellerId} falhou:`, e.message);
     }
   }
-  console.log(`   ${saved} nova(s) oferta(s) salva(s) (${offers.length} retornadas)`);
+
+  console.log(`   ${saved} nova(s) oferta(s) salva(s) (${sellers.length} sellers consultados)`);
   return saved;
 }

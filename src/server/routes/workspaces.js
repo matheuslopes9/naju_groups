@@ -4,6 +4,7 @@ import { waManager } from '../whatsapp/manager.js';
 import { formatOffer } from '../formatter.js';
 import { runWorkspace } from '../worker.js';
 import { audit } from '../audit.js';
+import { lookupSellerByNickname } from '../ml/search.js';
 
 const router = Router();
 
@@ -188,6 +189,73 @@ router.post('/:id/groups', async (req, res) => {
 
 router.delete('/:id/groups/:groupId', async (req, res) => {
   await prisma.group.delete({ where: { id: req.params.groupId } });
+  res.json({ ok: true });
+});
+
+// ---- Sellers monitorados pelo workspace ----
+
+router.get('/:id/sellers', async (req, res) => {
+  const sellers = await prisma.workspaceSeller.findMany({
+    where: { workspaceId: req.params.id },
+    orderBy: { createdAt: 'desc' },
+  });
+  res.json(sellers);
+});
+
+router.post('/:id/sellers/lookup', async (req, res) => {
+  const { nickname } = req.body ?? {};
+  if (!nickname) return res.status(400).json({ error: 'nickname obrigatório' });
+  try {
+    const info = await lookupSellerByNickname(nickname);
+    res.json(info);
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
+router.post('/:id/sellers', async (req, res) => {
+  const { nickname, sellerId } = req.body ?? {};
+  if (!nickname && !sellerId) {
+    return res.status(400).json({ error: 'nickname ou sellerId obrigatório' });
+  }
+  try {
+    let info;
+    if (sellerId) {
+      info = { sellerId: String(sellerId), nickname: nickname ?? null };
+    } else {
+      info = await lookupSellerByNickname(nickname);
+    }
+    const saved = await prisma.workspaceSeller.create({
+      data: {
+        workspaceId: req.params.id,
+        sellerId: info.sellerId,
+        nickname: info.nickname,
+      },
+    });
+    audit('seller.add', { entity: 'seller', entityId: saved.id, workspaceId: req.params.id, payload: { nickname: info.nickname } });
+    res.status(201).json(saved);
+  } catch (e) {
+    if (e.code === 'P2002') {
+      return res.status(409).json({ error: 'Seller já cadastrado neste workspace' });
+    }
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.patch('/:id/sellers/:sellerRowId', async (req, res) => {
+  const { enabled } = req.body ?? {};
+  const data = {};
+  if (typeof enabled === 'boolean') data.enabled = enabled;
+  const seller = await prisma.workspaceSeller.update({
+    where: { id: req.params.sellerRowId },
+    data,
+  });
+  res.json(seller);
+});
+
+router.delete('/:id/sellers/:sellerRowId', async (req, res) => {
+  await prisma.workspaceSeller.delete({ where: { id: req.params.sellerRowId } });
+  audit('seller.remove', { entity: 'seller', entityId: req.params.sellerRowId, workspaceId: req.params.id });
   res.json({ ok: true });
 });
 
