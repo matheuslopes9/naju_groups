@@ -4,6 +4,7 @@
  */
 import { Router } from 'express';
 import { getMlStatus } from '../ml/oauth.js';
+import { pingUsersMe, pingSearchMinimal } from '../ml/search.js';
 import { audit } from '../audit.js';
 import { encrypt } from '../crypto.js';
 import { prisma } from '../db.js';
@@ -13,6 +14,20 @@ const router = Router();
 router.get('/status', async (_req, res) => {
   try { res.json(await getMlStatus()); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * Diagnóstico: testa /users/me (canonical) e /sites/MLB/search (mínimo).
+ * Retorna ambos status + body curto, sem mascarar — fica claro qual passa
+ * e qual falha pra isolar onde está o problema.
+ */
+router.get('/test', async (_req, res) => {
+  const results = {};
+  try { results.usersMe = await pingUsersMe(); }
+  catch (e) { results.usersMe = { error: e.message }; }
+  try { results.searchMinimal = await pingSearchMinimal(); }
+  catch (e) { results.searchMinimal = { error: e.message }; }
+  res.json(results);
 });
 
 // ---- App config (Client ID / Secret / Redirect URI / Tag) ----

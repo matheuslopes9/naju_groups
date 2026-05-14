@@ -11,6 +11,8 @@ export default function Settings() {
   const [showSecret, setShowSecret] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -59,6 +61,17 @@ export default function Settings() {
     } finally { setSaving(false); }
   }
 
+  async function runTest() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await api.mlTest();
+      setTestResult(r);
+    } catch (e) {
+      setTestResult({ error: e.message });
+    } finally { setTesting(false); }
+  }
+
   async function clearAll() {
     if (!confirm('Remover toda a configuração do app ML? Isso também desautoriza o token atual.')) return;
     try {
@@ -103,6 +116,10 @@ export default function Settings() {
           </div>
           {mlStatus?.connected && (
             <div className="mt-3 flex flex-wrap gap-2">
+              <button onClick={runTest} disabled={testing} className="btn btn-primary !text-xs">
+                {testing ? <Icon.Loader width={14} height={14} /> : <Icon.Activity width={14} height={14} />}
+                {testing ? 'Testando…' : 'Testar conexão'}
+              </button>
               <a href="/ml/authorize" className="btn btn-secondary !text-xs">
                 <Icon.RefreshCw width={14} height={14} /> Reautorizar
               </a>
@@ -113,6 +130,16 @@ export default function Settings() {
               <a href="/ml/authorize" className="btn btn-primary !text-xs">
                 <Icon.Zap width={14} height={14} /> Autorizar agora
               </a>
+            </div>
+          )}
+
+          {testResult && (
+            <div className="mt-4 space-y-2 animate-fade-in">
+              <TestRow label="/users/me" result={testResult.usersMe} />
+              <TestRow label="/sites/MLB/search?q=fone" result={testResult.searchMinimal} />
+              {testResult.error && (
+                <div className="text-xs text-rose-400">Erro: {testResult.error}</div>
+              )}
             </div>
           )}
         </div>
@@ -247,6 +274,33 @@ export default function Settings() {
         </div>
       </div>
     </Layout>
+  );
+}
+
+function TestRow({ label, result }) {
+  if (!result) return null;
+  if (result.error) {
+    return (
+      <div className="rounded-lg p-2.5 text-xs" style={{ background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)' }}>
+        <div className="font-medium text-rose-400">❌ {label}</div>
+        <pre className="mt-1 font-mono overflow-x-auto" style={{ color: 'rgb(var(--text-muted))' }}>{result.error}</pre>
+      </div>
+    );
+  }
+  const ok = result.ok;
+  return (
+    <div className="rounded-lg p-2.5 text-xs"
+         style={{
+           background: ok ? 'rgba(16,185,129,0.08)' : 'rgba(244,63,94,0.08)',
+           border: `1px solid ${ok ? 'rgba(16,185,129,0.25)' : 'rgba(244,63,94,0.25)'}`,
+         }}>
+      <div className="font-medium" style={{ color: ok ? 'rgb(16,185,129)' : 'rgb(244,63,94)' }}>
+        {ok ? '✅' : '❌'} {label} · HTTP {result.status}
+      </div>
+      <pre className="mt-1 font-mono overflow-x-auto whitespace-pre-wrap break-all" style={{ color: 'rgb(var(--text-muted))' }}>
+        {result.body}
+      </pre>
+    </div>
   );
 }
 

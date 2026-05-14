@@ -32,6 +32,7 @@ export const api = {
   mlAppGet: () => request('/api/ml/app'),
   mlAppSave: (data) => request('/api/ml/app', { method: 'POST', body: JSON.stringify(data) }),
   mlAppDelete: () => request('/api/ml/app', { method: 'DELETE' }),
+  mlTest: () => request('/api/ml/test'),
 
   // Workspaces
   listWorkspaces: () => request('/api/workspaces'),
