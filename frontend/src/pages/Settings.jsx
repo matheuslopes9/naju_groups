@@ -136,7 +136,28 @@ export default function Settings() {
           {testResult && (
             <div className="mt-4 space-y-2 animate-fade-in">
               <TestRow label="/users/me" result={testResult.usersMe} />
-              <TestRow label="/sites/MLB/search?q=fone" result={testResult.searchMinimal} />
+              <TestRow label="/sites/MLB/search (com fallback)" result={testResult.searchMinimal} />
+              {Array.isArray(testResult.searchVariants) && testResult.searchVariants.length > 0 && (
+                <details className="rounded-lg p-2.5 text-xs" style={{ background: 'rgba(var(--bg-elevated), 0.6)', border: '1px solid rgb(var(--border))' }}>
+                  <summary className="cursor-pointer font-medium" style={{ color: 'rgb(var(--text-secondary))' }}>
+                    Detalhe das variantes testadas ({testResult.searchVariants.length})
+                  </summary>
+                  <div className="mt-2 space-y-1.5">
+                    {testResult.searchVariants.map((v, i) => (
+                      <div key={i} className="flex items-start gap-2">
+                        <span className={v.ok ? 'text-emerald-400' : 'text-rose-400'}>
+                          {v.ok ? '✓' : '✗'}
+                        </span>
+                        <div className="flex-1 font-mono">
+                          <div>{v.variant} → HTTP {v.status ?? 'erro'}</div>
+                          {v.body && <div className="text-xs opacity-70 mt-0.5 break-all">{v.body.slice(0, 200)}</div>}
+                          {v.error && <div className="text-xs text-rose-400 mt-0.5">{v.error}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
               {testResult.error && (
                 <div className="text-xs text-rose-400">Erro: {testResult.error}</div>
               )}

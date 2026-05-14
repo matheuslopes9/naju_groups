@@ -4,7 +4,7 @@
  */
 import { Router } from 'express';
 import { getMlStatus } from '../ml/oauth.js';
-import { pingUsersMe, pingSearchMinimal } from '../ml/search.js';
+import { pingUsersMe, pingSearchMinimal, diagnoseSearch } from '../ml/search.js';
 import { audit } from '../audit.js';
 import { encrypt } from '../crypto.js';
 import { prisma } from '../db.js';
@@ -27,6 +27,8 @@ router.get('/test', async (_req, res) => {
   catch (e) { results.usersMe = { error: e.message }; }
   try { results.searchMinimal = await pingSearchMinimal(); }
   catch (e) { results.searchMinimal = { error: e.message }; }
+  try { results.searchVariants = await diagnoseSearch(); }
+  catch (e) { results.searchVariants = { error: e.message }; }
   res.json(results);
 });
 
