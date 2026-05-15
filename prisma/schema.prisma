@@ -109,6 +109,9 @@ model Offer {
   commissionPct Float?   @map("commission_pct")   // 0.16 = 16%
   estimatedCommission Float? @map("estimated_commission") // price * commissionPct
   score         Int?     // 0-100, atratividade
+  // Shortlink oficial gerado no portal afiliados (preferido sobre ?tag=)
+  shortlink         String?
+  shortlinkAddedAt  DateTime? @map("shortlink_added_at")
   // Status
   status        String   @default("pending")
   sentAt        DateTime? @map("sent_at")

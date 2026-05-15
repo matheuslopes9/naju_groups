@@ -69,5 +69,6 @@ export const api = {
   addOfferByUrl: (id, url) => request(`/api/workspaces/${id}/offers/add-by-url`, { method: 'POST', body: JSON.stringify({ url }) }),
   listOffers: (id, status = 'pending') => request(`/api/workspaces/${id}/offers?status=${status}`),
   approveOffer: (id, oid) => request(`/api/workspaces/${id}/offers/${oid}/approve`, { method: 'POST' }),
+  setShortlink: (id, oid, shortlink) => request(`/api/workspaces/${id}/offers/${oid}/shortlink`, { method: 'PATCH', body: JSON.stringify({ shortlink }) }),
   rejectOffer: (id, oid) => request(`/api/workspaces/${id}/offers/${oid}/reject`, { method: 'POST' }),
 };

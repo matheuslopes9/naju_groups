@@ -12,7 +12,7 @@ const router = Router();
 
 // Métricas agregadas pra dashboard
 router.get('/stats', async (_req, res) => {
-  const [workspaces, pendingCount, sentCount, rejectedCount, totalSaved, latestPending] = await Promise.all([
+  const [workspaces, pendingCount, sentCount, rejectedCount, totalSaved, latestPending, pendingWithShortlink] = await Promise.all([
     prisma.workspace.count(),
     prisma.offer.count({ where: { status: 'pending' } }),
     prisma.offer.count({ where: { status: 'sent' } }),
@@ -24,6 +24,7 @@ router.get('/stats', async (_req, res) => {
       take: 5,
       include: { workspace: { select: { name: true, id: true } } },
     }),
+    prisma.offer.count({ where: { status: 'pending', shortlink: { not: null } } }),
   ]);
 
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -51,6 +52,9 @@ router.get('/stats', async (_req, res) => {
     workspaces,
     offers: {
       pending: pendingCount,
+      pendingWithShortlink,
+      pendingReady: pendingWithShortlink, // alias
+      pendingNeedShortlink: pendingCount - pendingWithShortlink,
       sent: sentCount,
       rejected: rejectedCount,
       total: pendingCount + sentCount + rejectedCount,
@@ -344,9 +348,49 @@ router.get('/:id/offers', async (req, res) => {
   res.json(offers);
 });
 
+// Salvar shortlink oficial (gerado pelo usuário no portal)
+router.patch('/:id/offers/:offerId/shortlink', async (req, res) => {
+  const { shortlink } = req.body ?? {};
+  if (!shortlink || !String(shortlink).trim()) {
+    return res.status(400).json({ error: 'shortlink obrigatório' });
+  }
+  const trimmed = String(shortlink).trim();
+  // Validação leve: aceitar mercadolivre.com.br/sec/... ou variantes do ML
+  const isValid = /mercadoli(vre|bre)\./i.test(trimmed) || /\/sec\//i.test(trimmed);
+  if (!isValid) {
+    return res.status(400).json({ error: 'URL inválida — deve ser um link do Mercado Livre' });
+  }
+  try {
+    const offer = await prisma.offer.update({
+      where: { id: req.params.offerId },
+      data: {
+        shortlink: trimmed,
+        shortlinkAddedAt: new Date(),
+      },
+    });
+    if (offer.workspaceId !== req.params.id) {
+      return res.status(404).json({ error: 'not found' });
+    }
+    audit('offer.shortlink_added', {
+      entity: 'offer', entityId: offer.id, workspaceId: req.params.id,
+    });
+    res.json(offer);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 router.post('/:id/offers/:offerId/approve', async (req, res) => {
   const offer = await prisma.offer.findUnique({ where: { id: req.params.offerId } });
   if (!offer || offer.workspaceId !== req.params.id) return res.status(404).json({ error: 'not found' });
+
+  // BLOQUEIO: exige shortlink oficial antes de enviar
+  if (!offer.shortlink) {
+    return res.status(400).json({
+      error: 'Esta oferta não tem shortlink oficial cadastrado. Gere o link no portal de afiliados e cole no card antes de aprovar.',
+      needsShortlink: true,
+    });
+  }
 
   // Envia pro(s) grupo(s) de STAGING desse workspace
   const groups = await prisma.group.findMany({
@@ -356,6 +400,9 @@ router.post('/:id/offers/:offerId/approve', async (req, res) => {
     return res.status(400).json({ error: 'Nenhum grupo de staging cadastrado neste workspace' });
   }
 
+  // Prioriza shortlink oficial (gerado no portal); fallback pro affiliate_url com ?tag=
+  const finalUrl = offer.shortlink || offer.affiliateUrl;
+
   const text = formatOffer({
     title: offer.title,
     price: offer.price,
@@ -363,7 +410,7 @@ router.post('/:id/offers/:offerId/approve', async (req, res) => {
     discountPercent: offer.discountPercent,
     freeShipping: offer.freeShipping,
     soldQuantity: offer.soldQuantity,
-    affiliateUrl: offer.affiliateUrl,
+    affiliateUrl: finalUrl,
     coupon: offer.coupon,
     highlight: offer.highlight,
   });

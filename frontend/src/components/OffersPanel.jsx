@@ -89,12 +89,26 @@ export default function OffersPanel({ ws }) {
       await api.approveOffer(ws.id, oid);
       toast.success('Oferta aprovada e enviada');
       load();
-    } catch (e) { toast.error(e.message); }
+    } catch (e) {
+      // Se erro pediu shortlink, foca atenção no card
+      if (e.message?.includes('shortlink')) {
+        toast.error('Cole o shortlink oficial antes de aprovar');
+      } else {
+        toast.error(e.message);
+      }
+    }
   }
   async function reject(oid) {
     await api.rejectOffer(ws.id, oid);
     toast.info('Oferta rejeitada');
     load();
+  }
+  async function setShortlink(oid, shortlink) {
+    try {
+      await api.setShortlink(ws.id, oid, shortlink);
+      toast.success('Shortlink salvo');
+      load();
+    } catch (e) { toast.error(e.message); }
   }
 
   const running = !!evtRef.current;
@@ -170,7 +184,9 @@ export default function OffersPanel({ ws }) {
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger">
           {offers.map((o) => (
             <OfferCard key={o.id} offer={o} tab={tab}
-              onApprove={() => approve(o.id)} onReject={() => reject(o.id)} />
+              onApprove={() => approve(o.id)}
+              onReject={() => reject(o.id)}
+              onSetShortlink={(sl) => setShortlink(o.id, sl)} />
           ))}
         </div>
       )}
@@ -246,10 +262,31 @@ const CATEGORY_LABELS = {
   music: '🎸 Música', games: '🎮 Games', other: '📦 Outros',
 };
 
-function OfferCard({ offer, tab, onApprove, onReject }) {
+function OfferCard({ offer, tab, onApprove, onReject, onSetShortlink }) {
   const catLabel = CATEGORY_LABELS[offer.categoryDetected] ?? CATEGORY_LABELS.other;
   const commission = offer.estimatedCommission;
   const scoreColor = (offer.score ?? 0) >= 70 ? 'badge-success' : (offer.score ?? 0) >= 50 ? 'badge-warning' : 'badge-muted';
+  const hasShortlink = !!offer.shortlink;
+  const [shortlinkDraft, setShortlinkDraft] = useState('');
+  const [editing, setEditing] = useState(false);
+
+  async function copyPermalink() {
+    try {
+      await navigator.clipboard.writeText(offer.permalink);
+      toast.success('URL copiada — cole no portal de afiliados');
+      window.open('https://www.mercadolivre.com.br/afiliados/criar-link', '_blank', 'noopener');
+    } catch {
+      toast.error('Falha ao copiar — selecione manualmente');
+    }
+  }
+
+  function saveShortlink() {
+    const v = shortlinkDraft.trim();
+    if (!v) return;
+    onSetShortlink(v);
+    setShortlinkDraft('');
+    setEditing(false);
+  }
 
   return (
     <div className="card card-hover !p-0 overflow-hidden flex flex-col">
@@ -302,16 +339,69 @@ function OfferCard({ offer, tab, onApprove, onReject }) {
           </div>
         )}
 
-        <a href={offer.affiliateUrl} target="_blank" rel="noreferrer"
-           className="text-xs flex items-center gap-1 mb-3 hover:text-gradient transition truncate"
-           style={{ color: 'rgb(var(--text-muted))' }}>
-          <Icon.ExternalLink width={12} height={12} /> Ver no ML (com sua tag)
-        </a>
+        {/* Shortlink workflow (só em pending) */}
+        {tab === 'pending' && (
+          <div className="mb-3 space-y-2">
+            {hasShortlink ? (
+              <div className="text-[11px] px-2 py-1.5 rounded flex items-center justify-between gap-2"
+                   style={{ background: 'rgba(16,185,129,0.1)', color: 'rgb(16,185,129)' }}>
+                <span className="flex items-center gap-1 min-w-0">
+                  <Icon.Check width={12} height={12} className="shrink-0" />
+                  <span className="truncate font-mono">{offer.shortlink}</span>
+                </span>
+                <button onClick={() => { setEditing(true); setShortlinkDraft(offer.shortlink); }}
+                        className="text-[10px] opacity-70 hover:opacity-100 shrink-0">editar</button>
+              </div>
+            ) : editing ? (
+              <div className="space-y-1.5">
+                <input
+                  autoFocus
+                  value={shortlinkDraft}
+                  onChange={(e) => setShortlinkDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') saveShortlink(); if (e.key === 'Escape') setEditing(false); }}
+                  placeholder="cole aqui mercadolivre.com.br/sec/..."
+                  className="input !text-xs !py-1.5 font-mono"
+                />
+                <div className="flex gap-1">
+                  <button onClick={saveShortlink} className="btn btn-primary !text-[10px] !py-1 flex-1">
+                    <Icon.Check width={12} height={12} /> Salvar
+                  </button>
+                  <button onClick={() => setEditing(false)} className="btn btn-ghost !text-[10px] !py-1">
+                    cancelar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <button onClick={copyPermalink}
+                        className="btn btn-secondary !text-[10px] !py-1.5 w-full"
+                        title="Copia URL + abre o gerador do ML em nova aba">
+                  <Icon.ExternalLink width={12} height={12} /> Copiar URL + abrir gerador
+                </button>
+                <button onClick={() => setEditing(true)}
+                        className="btn btn-ghost !text-[10px] !py-1.5 w-full">
+                  <Icon.Plus width={12} height={12} /> Colar shortlink aqui
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab !== 'pending' && (
+          <a href={offer.shortlink || offer.affiliateUrl} target="_blank" rel="noreferrer"
+             className="text-xs flex items-center gap-1 mb-3 hover:text-gradient transition truncate"
+             style={{ color: 'rgb(var(--text-muted))' }}>
+            <Icon.ExternalLink width={12} height={12} /> {offer.shortlink ? 'Ver shortlink' : 'Ver no ML'}
+          </a>
+        )}
 
         <div className="mt-auto">
           {tab === 'pending' && (
             <div className="flex gap-2">
-              <button onClick={onApprove} className="btn btn-primary flex-1 !py-1.5 !text-xs">
+              <button onClick={onApprove}
+                      disabled={!hasShortlink}
+                      title={hasShortlink ? '' : 'Cole o shortlink oficial primeiro'}
+                      className="btn btn-primary flex-1 !py-1.5 !text-xs">
                 <Icon.Check width={14} height={14} /> Aprovar e enviar
               </button>
               <button onClick={onReject} className="btn btn-secondary !py-1.5 !px-2.5">
