@@ -141,6 +141,10 @@ function parseOffersPage(html) {
     // Selo (Oferta do Dia, Black, Queima, etc)
     const highlight = $el.find('span.poly-component__highlight').first().text().trim();
 
+    // Cupom (pill no rodapé do card)
+    const coupon = $el.find('span.poly-coupons__pill, .poly-coupons span').first().text().trim()
+                || ($el.text().match(/Cupom[^,\n]{0,30}/i)?.[0]?.trim() ?? '');
+
     if (price == null) return;
 
     offers.push({
@@ -156,6 +160,7 @@ function parseOffersPage(html) {
       freeShipping,
       soldQuantity: 0,
       highlight: highlight || null,
+      coupon: coupon || null,
     });
   });
 
@@ -253,32 +258,40 @@ async function fetchItemByScraping(url) {
 }
 
 /**
- * Calcula score de atratividade (0-100) baseado em múltiplos sinais.
- * Maior score = oferta mais atrativa pra divulgar.
+ * Calcula score de atratividade (0-100) usando RENTABILIDADE como métrica principal.
+ *
+ * Pesos:
+ *   - Comissão estimada (R$): 0-40 pts  (ofertas que rendem mais ganham mais)
+ *   - Desconto %: 0-25 pts             (incentivo de conversão)
+ *   - Cupom: +15 pts                   (selo "use cupom" tem alta conversão)
+ *   - Selo destacado: +10 pts          (oferta do dia, queima)
+ *   - Frete grátis: +10 pts
  */
 export function scoreOffer(o, opts = {}) {
-  const { priceMin = 30, priceMax = 300 } = opts;
+  const { estimatedCommission = 0, priceMin = 30, priceMax = 500 } = opts;
   let score = 0;
 
-  // Desconto: 0-50 pontos (50% off = 50 pts)
-  score += Math.min(50, o.discountPercent);
+  // Rentabilidade: comissão estimada vira pontos. Curva: 0=0pts, R$5=20pts, R$15+=40pts
+  if (estimatedCommission >= 15) score += 40;
+  else if (estimatedCommission >= 5) score += 20 + Math.round((estimatedCommission - 5) * 2);
+  else score += Math.round(estimatedCommission * 4);
 
-  // Frete grátis: +15 pts
-  if (o.freeShipping) score += 15;
+  // Desconto: 0-25 pts (50% off = 25 pts)
+  score += Math.min(25, Math.round(o.discountPercent * 0.5));
 
-  // Selo destacado: +15 pts (oferta do dia, queima, etc)
-  if (o.highlight) score += 15;
+  // Cupom: +15 pts
+  if (o.coupon) score += 15;
 
-  // Faixa de preço ideal (R$ priceMin-priceMax): +20 pts; senão penaliza
-  if (o.price >= priceMin && o.price <= priceMax) {
-    score += 20;
-  } else if (o.price < priceMin) {
-    score += 5; // muito barato, pouco margem de comissão
-  } else {
-    score += 8; // caro mas pode converter
-  }
+  // Selo destacado: +10 pts
+  if (o.highlight) score += 10;
 
-  return Math.min(100, Math.round(score));
+  // Frete grátis: +10 pts
+  if (o.freeShipping) score += 10;
+
+  // Penalidade levíssima fora da faixa de preço (mantém ofertas premium acessíveis)
+  if (o.price < priceMin || o.price > priceMax) score -= 5;
+
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
 /**

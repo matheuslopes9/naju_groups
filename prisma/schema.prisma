@@ -102,7 +102,15 @@ model Offer {
   freeShipping  Boolean  @default(false) @map("free_shipping")
   condition     String?
   soldQuantity  Int      @default(0) @map("sold_quantity")
-  status        String   @default("pending") // pending | sent | rejected | duplicate
+  // Enriquecimento
+  coupon        String?  // texto do cupom (ex: "Cupom 10% OFF")
+  highlight     String?  // selo (ex: "Oferta do Dia", "Mais Vendido")
+  categoryDetected String? @map("category_detected") // 'beauty', 'fashion', etc
+  commissionPct Float?   @map("commission_pct")   // 0.16 = 16%
+  estimatedCommission Float? @map("estimated_commission") // price * commissionPct
+  score         Int?     // 0-100, atratividade
+  // Status
+  status        String   @default("pending")
   sentAt        DateTime? @map("sent_at")
   createdAt     DateTime @default(now()) @map("created_at")
 

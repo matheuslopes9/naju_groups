@@ -13,6 +13,8 @@ export function formatOffer(offer) {
 
   if (offer.discountPercent > 0) lines.push(`📉 ${offer.discountPercent}% OFF`);
   if (offer.freeShipping) lines.push('🚚 Frete grátis');
+  if (offer.coupon) lines.push(`🎟️ ${offer.coupon}`);
+  if (offer.highlight) lines.push(`✨ ${offer.highlight}`);
   if (offer.soldQuantity > 0) lines.push(`📦 ${offer.soldQuantity} vendidos`);
 
   lines.push('');

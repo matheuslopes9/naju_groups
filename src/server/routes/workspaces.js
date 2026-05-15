@@ -364,6 +364,8 @@ router.post('/:id/offers/:offerId/approve', async (req, res) => {
     freeShipping: offer.freeShipping,
     soldQuantity: offer.soldQuantity,
     affiliateUrl: offer.affiliateUrl,
+    coupon: offer.coupon,
+    highlight: offer.highlight,
   });
 
   for (const g of groups) {

@@ -237,7 +237,20 @@ function ProgressView({ progress }) {
   );
 }
 
+const CATEGORY_LABELS = {
+  beauty: '💄 Beleza', health: '💊 Saúde', fashion: '👗 Moda', babies: '👶 Bebês',
+  home: '🏠 Casa', appliances: '🔌 Eletrodom.', sports: '⚽ Esportes',
+  toys: '🧸 Brinquedos', pets: '🐶 Pet', books: '📚 Livros', food: '🍔 Alimentos',
+  electronics: '🎧 Eletrônicos', computing: '💻 Informática', cellphones: '📱 Celulares',
+  cameras: '📷 Câmeras', auto: '🚗 Auto', tools: '🛠️ Ferramentas',
+  music: '🎸 Música', games: '🎮 Games', other: '📦 Outros',
+};
+
 function OfferCard({ offer, tab, onApprove, onReject }) {
+  const catLabel = CATEGORY_LABELS[offer.categoryDetected] ?? CATEGORY_LABELS.other;
+  const commission = offer.estimatedCommission;
+  const scoreColor = (offer.score ?? 0) >= 70 ? 'badge-success' : (offer.score ?? 0) >= 50 ? 'badge-warning' : 'badge-muted';
+
   return (
     <div className="card card-hover !p-0 overflow-hidden flex flex-col">
       <div className="relative aspect-[4/3] overflow-hidden" style={{ background: 'rgba(var(--bg-elevated), 0.5)' }}>
@@ -247,13 +260,23 @@ function OfferCard({ offer, tab, onApprove, onReject }) {
             -{offer.discountPercent}%
           </span>
         )}
+        {offer.score != null && (
+          <span className={`absolute bottom-2 left-2 badge ${scoreColor} shadow-lg`} title="Score de atratividade (0-100)">
+            ⭐ {offer.score}
+          </span>
+        )}
         {offer.freeShipping && (
-          <span className="absolute top-2 right-2 badge badge-success">🚚 frete grátis</span>
+          <span className="absolute top-2 right-2 badge badge-success">🚚</span>
+        )}
+        {offer.coupon && (
+          <span className="absolute bottom-2 right-2 badge !bg-indigo-500 !text-white shadow-lg" title={offer.coupon}>
+            🎟️ cupom
+          </span>
         )}
       </div>
       <div className="p-4 flex-1 flex flex-col">
         <h4 className="font-medium text-sm line-clamp-2 mb-2 min-h-[2.5rem]">{offer.title}</h4>
-        <div className="flex items-baseline gap-2 mb-2">
+        <div className="flex items-baseline gap-2 mb-1">
           {offer.originalPrice && offer.originalPrice > offer.price && (
             <span className="text-xs line-through" style={{ color: 'rgb(var(--text-muted))' }}>
               R$ {offer.originalPrice.toFixed(2)}
@@ -261,6 +284,24 @@ function OfferCard({ offer, tab, onApprove, onReject }) {
           )}
           <span className="font-bold text-lg text-gradient">R$ {offer.price.toFixed(2)}</span>
         </div>
+
+        {/* Rentabilidade estimada */}
+        <div className="flex items-center justify-between text-[11px] mb-2" style={{ color: 'rgb(var(--text-muted))' }}>
+          <span className="badge badge-muted !text-[10px]">{catLabel}</span>
+          {commission != null && (
+            <span title={`Comissão estimada: ${(offer.commissionPct * 100).toFixed(0)}%`}>
+              💰 ~R$ {commission.toFixed(2)}
+            </span>
+          )}
+        </div>
+
+        {offer.coupon && (
+          <div className="text-[11px] mb-2 px-2 py-1 rounded"
+               style={{ background: 'rgba(99,102,241,0.1)', color: 'rgb(129,140,248)' }}>
+            🎟️ {offer.coupon}
+          </div>
+        )}
+
         <a href={offer.affiliateUrl} target="_blank" rel="noreferrer"
            className="text-xs flex items-center gap-1 mb-3 hover:text-gradient transition truncate"
            style={{ color: 'rgb(var(--text-muted))' }}>

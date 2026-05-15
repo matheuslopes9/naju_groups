@@ -1,7 +1,7 @@
 /**
- * Worker: scraping periódico das fontes /ofertas[/sub] configuradas em cada
- * workspace + filtragem por keywords/preço/desconto + score de atratividade
- * + cooldown anti-repetição.
+ * Worker: scraping periódico das fontes /ofertas[/sub] + filtragem
+ * por keywords/preço/desconto + enriquecimento (categoria detectada,
+ * comissão estimada, score) + cooldown anti-repetição.
  *
  * Política: nada vai pra grupo sem aprovação manual.
  */
@@ -9,6 +9,7 @@ import { prisma } from './db.js';
 import { scrapeSource, scoreOffer, matchKeywords } from './ml/scraper.js';
 import { attachAffiliateTag } from './ml/affiliate.js';
 import { getAffiliateTag } from './ml/oauth.js';
+import { detectCategory, commissionPctFor, estimateCommission } from './ml/commission.js';
 
 const lastRunMap = new Map();
 
@@ -29,17 +30,13 @@ async function runOnce() {
   }
 }
 
-/**
- * Roda 1 ciclo de busca pra um workspace.
- * Aceita `onProgress` opcional pra streaming (SSE).
- */
 export async function runWorkspace(ws, onProgress) {
   const sources = await prisma.workspaceSource.findMany({
     where: { workspaceId: ws.id, enabled: true },
   });
 
   if (sources.length === 0) {
-    onProgress?.({ stage: 'error', message: 'Nenhuma fonte cadastrada. Adicione em Fontes.' });
+    onProgress?.({ stage: 'error', message: 'Nenhuma fonte cadastrada. Adicione em Configuração.' });
     return { saved: 0, scanned: 0 };
   }
 
@@ -61,7 +58,7 @@ export async function runWorkspace(ws, onProgress) {
     try {
       candidates = await scrapeSource(
         { slug: source.slug, maxPages: source.maxPages },
-        (p) => onProgress?.({ stage: 'page', source: source.label, ...p })
+        (p) => onProgress?.({ stage: 'page', source: source.label, current: i, total: sources.length, ...p })
       );
     } catch (e) {
       onProgress?.({ stage: 'source-error', source: source.label, error: e.message });
@@ -69,8 +66,21 @@ export async function runWorkspace(ws, onProgress) {
     }
     scanned += candidates.length;
 
-    // Filtragem
-    const filtered = candidates.filter((o) => {
+    // Enriquecimento: detecta categoria + calcula comissão estimada + score
+    const enriched = candidates.map((o) => {
+      const categoryDetected = detectCategory(o.title);
+      const commissionPct = commissionPctFor(categoryDetected);
+      const estimated = estimateCommission(o.price, categoryDetected);
+      const score = scoreOffer(o, {
+        estimatedCommission: estimated,
+        priceMin: ws.priceMin ?? 30,
+        priceMax: ws.priceMax ?? 500,
+      });
+      return { ...o, categoryDetected, commissionPct, estimatedCommission: estimated, score };
+    });
+
+    // Filtragem (após enriquecimento pra UI mostrar estatística mesmo se filtrado)
+    const filtered = enriched.filter((o) => {
       if (o.discountPercent < (ws.minDiscount ?? 0)) return false;
       if (ws.onlyFreeShipping && !o.freeShipping) return false;
       if (ws.onlyDeals && !o.originalPrice) return false;
@@ -80,21 +90,19 @@ export async function runWorkspace(ws, onProgress) {
       return true;
     });
 
-    // Ordena por score (mais atrativos primeiro), com ordem secundária aleatória
-    const scored = filtered
-      .map((o) => ({ ...o, _score: scoreOffer(o, { priceMin: ws.priceMin ?? 30, priceMax: ws.priceMax ?? 300 }) }))
-      .sort((a, b) => b._score - a._score + (Math.random() - 0.5) * 0.1);
+    // Ordena por score (rentabilidade alta primeiro), com jitter aleatório pra variar
+    const scored = filtered.sort((a, b) => (b.score - a.score) + (Math.random() - 0.5) * 5);
 
-    // Aplica cooldown: produto que foi visto/postado recente não entra de novo
+    // Cooldown: produto visto nos últimos N dias não entra de novo
     const productIds = scored.map((o) => o.productId);
-    const recent = await prisma.offer.findMany({
+    const recent = productIds.length > 0 ? await prisma.offer.findMany({
       where: {
         productId: { in: productIds },
         workspaceId: ws.id,
         createdAt: { gte: cooldownDate },
       },
       select: { productId: true },
-    });
+    }) : [];
     const recentSet = new Set(recent.map((r) => r.productId));
 
     let savedThisSource = 0;
@@ -117,19 +125,27 @@ export async function runWorkspace(ws, onProgress) {
             freeShipping: o.freeShipping,
             condition: o.condition,
             soldQuantity: o.soldQuantity,
+            coupon: o.coupon ?? null,
+            highlight: o.highlight ?? null,
+            categoryDetected: o.categoryDetected,
+            commissionPct: o.commissionPct,
+            estimatedCommission: o.estimatedCommission,
+            score: o.score,
             status: 'pending',
           },
         });
         saved++;
         savedThisSource++;
       } catch {
-        // duplicata (productId já existe, mesmo fora do cooldown) — ignora silenciosamente
+        // duplicata (productId+workspaceId)
       }
     }
 
     onProgress?.({
       stage: 'source-done',
       source: source.label,
+      current: i,
+      total: sources.length,
       scanned: candidates.length,
       filtered: filtered.length,
       saved: savedThisSource,
