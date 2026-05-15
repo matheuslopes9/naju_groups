@@ -5,7 +5,7 @@ import { toast } from '../toast.jsx';
 import Layout from '../components/Layout.jsx';
 import WhatsAppPanel from '../components/WhatsAppPanel.jsx';
 import GroupsPanel from '../components/GroupsPanel.jsx';
-import CategoriesPanel from '../components/CategoriesPanel.jsx';
+import SourcesPanel from '../components/SourcesPanel.jsx';
 import FiltersPanel from '../components/FiltersPanel.jsx';
 import OffersPanel from '../components/OffersPanel.jsx';
 import { Icon } from '../components/Icon.jsx';
@@ -64,7 +64,7 @@ export default function WorkspaceDetail() {
     { id: 'overview', label: 'Visão geral', icon: Icon.Home },
     { id: 'whatsapp', label: 'WhatsApp',    icon: Icon.Phone },
     { id: 'groups',   label: 'Grupos',      icon: Icon.Users },
-    { id: 'categories', label: 'Categorias', icon: Icon.Tag },
+    { id: 'sources',    label: 'Fontes',     icon: Icon.Search },
     { id: 'filters',  label: 'Filtros',     icon: Icon.Filter },
     { id: 'offers',   label: 'Ofertas',     icon: Icon.ShoppingBag },
   ];
@@ -157,7 +157,7 @@ export default function WorkspaceDetail() {
           {tab === 'overview' && <OverviewTab ws={ws} />}
           {tab === 'whatsapp' && <WhatsAppPanel ws={ws} reload={load} />}
           {tab === 'groups'   && <GroupsPanel ws={ws} reload={load} />}
-          {tab === 'categories' && <CategoriesPanel ws={ws} />}
+          {tab === 'sources' && <SourcesPanel ws={ws} />}
           {tab === 'filters'  && <FiltersPanel ws={ws} reload={load} />}
           {tab === 'offers'   && <OffersPanel ws={ws} reload={load} />}
         </div>

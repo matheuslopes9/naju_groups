@@ -1,19 +1,22 @@
 /**
- * Scraper light da página pública mercadolivre.com.br/ofertas.
+ * Scraper da página pública mercadolivre.com.br/ofertas + variantes.
  *
  * Por que scraping em vez de API:
- *   Desde abril/2025, ML bloqueou /sites/MLB/search publicamente.
- *   A página /ofertas é HTML estático (SSR), sem anti-bot, e fica acessível
- *   pra qualquer requisição com User-Agent de navegador.
+ *   Desde abril/2025 o ML bloqueou /sites/MLB/search publicamente.
+ *   A página /ofertas é HTML estático (SSR), sem anti-bot Akamai.
  *
- * Cuidados (riscos calculados):
- *   - Volume baixo: 1 página por categoria, 1x por hora máximo
- *   - User-Agent rotativo (lista pequena, suficiente pra não levantar flag)
- *   - Delay aleatório 2-5s entre fetches
- *   - NÃO segue paginação infinita (1 página de 54 cards é suficiente)
+ * Endpoints disponíveis (descobertos empiricamente em 2026-05):
+ *   - /ofertas (geral) — ~48 cards por página, paginado ?page=N (testado até 10)
+ *   - /ofertas/supermercado — ~113 cards (single page)
+ *   - /ofertas/informatica — página dedicada
+ *   - /ofertas/digitais — jogos digitais
+ *   Outros slugs (/ofertas/beleza, /ofertas/celulares etc) NÃO existem
+ *   (redirecionam pra home /ofertas).
  *
- * Limitação: a página /ofertas não filtra por % desconto via URL.
- * Aplica o filtro local (filtro pós-fetch).
+ * Cuidados:
+ *   - Volume baixo: 1 página/min máximo
+ *   - User-Agent rotativo (3 navegadores reais)
+ *   - Delay aleatório 1.5-3s entre páginas
  */
 import * as cheerio from 'cheerio';
 
@@ -29,44 +32,48 @@ function pickUA() {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
-function delay(min = 2000, max = 5000) {
+function delay(min = 1500, max = 3000) {
   const ms = min + Math.floor(Math.random() * (max - min));
   return new Promise((r) => setTimeout(r, ms));
 }
 
 /**
- * Mapeia categoria do nosso sistema → subpath de /ofertas no ML.
- * Quando não há subpath específico, scraping da /ofertas geral.
+ * Fontes válidas (URLs do ML que retornam HTML com produtos).
+ * Validadas empiricamente — outros slugs redirecionam pra /ofertas.
  */
-const CATEGORY_TO_PATH = {
-  MLB1246: 'beleza-e-cuidados-pessoais', // Beleza
-  MLB1430: 'moda',                        // Calçados, Roupas e Bolsas
-  MLB1574: 'casa-decoracao',              // Casa
-  MLB1000: 'eletronicos-audio-video',     // Eletrônicos
-  MLB1051: 'celulares-telefones',         // Celulares
-  MLB1648: 'informatica',                 // Informática
-  MLB5726: 'eletrodomesticos',            // Eletrodomésticos
-  MLB1132: 'brinquedos-hobbies',          // Brinquedos
-  MLB1384: 'bebes',                       // Bebês
-  MLB264586: 'saude',                     // Saúde
-  MLB1276: 'esportes-fitness',            // Esportes
-  MLB1144: 'games',                       // Games
-  MLB1403: 'alimentos-bebidas',           // Alimentos
-  MLB1071: 'animais',                     // Animais
-  MLB263532: 'ferramentas',               // Ferramentas
-  MLB1500: 'construcao',                  // Construção
-  // demais → /ofertas geral
-};
+export const AVAILABLE_SOURCES = [
+  { slug: '',             label: 'Ofertas Gerais',       paginated: true,  defaultPages: 5 },
+  { slug: 'supermercado', label: 'Supermercado',         paginated: false, defaultPages: 1 },
+  { slug: 'informatica',  label: 'Informática',          paginated: false, defaultPages: 1 },
+  { slug: 'digitais',     label: 'Jogos Digitais',       paginated: false, defaultPages: 1 },
+];
 
 /**
- * Faz scraping de uma única página de ofertas (até 54 produtos).
+ * Faz scraping de uma fonte (slug + maxPages).
+ * @returns {Promise<Array>} ofertas normalizadas
  */
-export async function scrapeOffers(categoryId) {
-  const subpath = CATEGORY_TO_PATH[categoryId];
-  const url = subpath ? `${BASE_URL}/ofertas/${subpath}` : `${BASE_URL}/ofertas`;
+export async function scrapeSource({ slug = '', maxPages = 1 } = {}, onProgress) {
+  const allOffers = [];
+  const sourceConfig = AVAILABLE_SOURCES.find((s) => s.slug === slug) ?? AVAILABLE_SOURCES[0];
+  const pages = sourceConfig.paginated ? Math.max(1, Math.min(maxPages, 10)) : 1;
+  const baseUrl = slug ? `${BASE_URL}/ofertas/${slug}` : `${BASE_URL}/ofertas`;
 
-  await delay(1000, 3000); // jitter inicial
+  for (let page = 1; page <= pages; page++) {
+    if (page > 1) await delay(2000, 4000);
+    const url = sourceConfig.paginated && page > 1 ? `${baseUrl}?page=${page}` : baseUrl;
+    try {
+      const offers = await scrapePage(url);
+      allOffers.push(...offers);
+      if (onProgress) onProgress({ slug: slug || 'geral', page, totalPages: pages, found: offers.length });
+    } catch (e) {
+      if (onProgress) onProgress({ slug: slug || 'geral', page, error: e.message });
+    }
+  }
+  return allOffers;
+}
 
+async function scrapePage(url) {
+  await delay(500, 1500);
   const res = await fetch(url, {
     headers: {
       'User-Agent': pickUA(),
@@ -76,7 +83,7 @@ export async function scrapeOffers(categoryId) {
     },
   });
   if (!res.ok) {
-    throw new Error(`Scrape /ofertas HTTP ${res.status}`);
+    throw new Error(`HTTP ${res.status}`);
   }
   const html = await res.text();
   return parseOffersPage(html);
@@ -85,36 +92,42 @@ export async function scrapeOffers(categoryId) {
 function parseOffersPage(html) {
   const $ = cheerio.load(html);
   const offers = [];
+  const seen = new Set();
 
-  $('div.andes-card.poly-card.poly-card--grid-card').each((_, el) => {
+  $('div.andes-card.poly-card').each((_, el) => {
     const $el = $(el);
 
-    const titleAnchor = $el.find('h3.poly-component__title-wrapper a.poly-component__title').first();
+    // FIX: o seletor velho exigia <h3>, mas markup novo é só <a class="poly-component__title">.
+    // Tenta os dois.
+    let titleAnchor = $el.find('a.poly-component__title').first();
+    if (!titleAnchor.length) {
+      titleAnchor = $el.find('h3.poly-component__title-wrapper a').first();
+    }
     const title = titleAnchor.text().trim();
     let permalink = titleAnchor.attr('href') ?? '';
-    permalink = permalink.split('#')[0]; // remove tracking
+    permalink = permalink.split('#')[0];
 
-    // ID do produto: extrai do permalink (formato .../MLB-XXXXXXX-... ou /p/MLBXXXXX)
     const productId = extractProductId(permalink);
     if (!title || !permalink || !productId) return;
+    if (seen.has(productId)) return;
+    seen.add(productId);
 
-    // Imagem (lazy ou src direto)
     const img = $el.find('img.poly-component__picture').first();
     const image = img.attr('data-src') ?? img.attr('src') ?? '';
 
     // Preço atual
     const $current = $el.find('div.poly-price__current').first();
-    const curReais = parseInt($current.find('span.andes-money-amount__fraction').first().text().replace(/\./g, ''), 10);
+    const curReais = parseInt(($current.find('span.andes-money-amount__fraction').first().text() || '0').replace(/\./g, ''), 10);
     const curCents = parseInt($current.find('span.andes-money-amount__cents').first().text() || '0', 10);
-    const price = isNaN(curReais) ? null : curReais + (curCents / 100);
+    const price = isNaN(curReais) || curReais === 0 ? null : curReais + (curCents / 100);
 
     // Preço original (riscado)
     const $orig = $el.find('s.andes-money-amount--previous').first();
     let originalPrice = null;
     if ($orig.length) {
-      const origReais = parseInt($orig.find('span.andes-money-amount__fraction').first().text().replace(/\./g, ''), 10);
+      const origReais = parseInt(($orig.find('span.andes-money-amount__fraction').first().text() || '0').replace(/\./g, ''), 10);
       const origCents = parseInt($orig.find('span.andes-money-amount__cents').first().text() || '0', 10);
-      if (!isNaN(origReais)) originalPrice = origReais + (origCents / 100);
+      if (!isNaN(origReais) && origReais > 0) originalPrice = origReais + (origCents / 100);
     }
 
     const discountPercent = originalPrice && originalPrice > price
@@ -124,6 +137,9 @@ function parseOffersPage(html) {
     // Frete grátis
     const shippingText = $el.find('div.poly-component__shipping').text();
     const freeShipping = shippingText.includes('Frete grátis');
+
+    // Selo (Oferta do Dia, Black, Queima, etc)
+    const highlight = $el.find('span.poly-component__highlight').first().text().trim();
 
     if (price == null) return;
 
@@ -139,6 +155,7 @@ function parseOffersPage(html) {
       condition: null,
       freeShipping,
       soldQuantity: 0,
+      highlight: highlight || null,
     });
   });
 
@@ -146,15 +163,13 @@ function parseOffersPage(html) {
 }
 
 /**
- * Extrai o productId (MLB-XXXX) de um permalink.
- * Suporta /p/MLB12345 (PDP) e /MLB-12345 (legado).
+ * Extrai o productId (MLBxxx) de um permalink.
+ * Suporta /p/MLB12345 (catalog PDP) e /MLB-12345 (item).
  */
 export function extractProductId(url) {
   if (!url) return null;
-  // /p/MLB12345 (catalog PDP)
   let m = url.match(/\/p\/(MLB\d+)/i);
   if (m) return m[1];
-  // /MLB-12345-... (item)
   m = url.match(/\/(MLB-?\d+)/i);
   if (m) return m[1].replace('-', '');
   return null;
@@ -169,7 +184,6 @@ export async function fetchItemByUrl(url) {
   if (!productId) {
     throw new Error('URL inválida — não consegui extrair o ID do produto');
   }
-  // Tenta /items/$ID primeiro (item à venda)
   const res = await fetch(`https://api.mercadolibre.com/items/${productId}`, {
     headers: {
       'User-Agent': pickUA(),
@@ -177,7 +191,6 @@ export async function fetchItemByUrl(url) {
     },
   });
   if (!res.ok) {
-    // Fallback: faz scraping da própria página do produto pra extrair os mesmos campos
     return await fetchItemByScraping(url);
   }
   const item = await res.json();
@@ -195,6 +208,7 @@ export async function fetchItemByUrl(url) {
     condition: item.condition,
     freeShipping: !!item.shipping?.free_shipping,
     soldQuantity: item.sold_quantity ?? 0,
+    highlight: null,
   };
 }
 
@@ -234,5 +248,47 @@ async function fetchItemByScraping(url) {
     condition: null,
     freeShipping: false,
     soldQuantity: 0,
+    highlight: null,
   };
+}
+
+/**
+ * Calcula score de atratividade (0-100) baseado em múltiplos sinais.
+ * Maior score = oferta mais atrativa pra divulgar.
+ */
+export function scoreOffer(o, opts = {}) {
+  const { priceMin = 30, priceMax = 300 } = opts;
+  let score = 0;
+
+  // Desconto: 0-50 pontos (50% off = 50 pts)
+  score += Math.min(50, o.discountPercent);
+
+  // Frete grátis: +15 pts
+  if (o.freeShipping) score += 15;
+
+  // Selo destacado: +15 pts (oferta do dia, queima, etc)
+  if (o.highlight) score += 15;
+
+  // Faixa de preço ideal (R$ priceMin-priceMax): +20 pts; senão penaliza
+  if (o.price >= priceMin && o.price <= priceMax) {
+    score += 20;
+  } else if (o.price < priceMin) {
+    score += 5; // muito barato, pouco margem de comissão
+  } else {
+    score += 8; // caro mas pode converter
+  }
+
+  return Math.min(100, Math.round(score));
+}
+
+/**
+ * Filtra ofertas pelo conjunto de keywords (case-insensitive).
+ * Se keywords vazio, retorna todas.
+ */
+export function matchKeywords(offer, keywordsCsv) {
+  if (!keywordsCsv?.trim()) return true;
+  const keywords = keywordsCsv.toLowerCase().split(',').map((k) => k.trim()).filter(Boolean);
+  if (keywords.length === 0) return true;
+  const title = offer.title.toLowerCase();
+  return keywords.some((k) => title.includes(k));
 }

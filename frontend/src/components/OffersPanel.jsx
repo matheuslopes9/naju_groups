@@ -1,21 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
 import { Icon } from './Icon.jsx';
 
 const TABS = [
-  { id: 'pending',  label: 'Pendentes', icon: Icon.Sparkles, tone: 'badge-warning' },
-  { id: 'sent',     label: 'Enviadas',  icon: Icon.Check,    tone: 'badge-success' },
-  { id: 'rejected', label: 'Rejeitadas', icon: Icon.X,       tone: 'badge-muted' },
+  { id: 'pending',  label: 'Pendentes', icon: Icon.Sparkles },
+  { id: 'sent',     label: 'Enviadas',  icon: Icon.Check },
+  { id: 'rejected', label: 'Rejeitadas', icon: Icon.X },
 ];
 
 export default function OffersPanel({ ws }) {
   const [tab, setTab] = useState('pending');
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
+  const [progress, setProgress] = useState(null); // { stage, source, page, totalPages, scanned, saved, ... }
   const [manualUrl, setManualUrl] = useState('');
   const [addingUrl, setAddingUrl] = useState(false);
+  const evtRef = useRef(null);
 
   async function load() {
     setLoading(true);
@@ -24,36 +25,69 @@ export default function OffersPanel({ ws }) {
   }
   useEffect(() => { load(); }, [ws.id, tab]);
 
-  async function searchNow() {
-    setSearching(true);
-    try {
-      const r = await api.searchNow(ws.id);
-      if (r.saved > 0) toast.success(`${r.saved} nova(s) oferta(s) salva(s)`);
-      else toast.info('Nenhuma oferta nova encontrada com os filtros atuais');
-      load();
-    } catch (e) {
-      toast.error(e.message);
-    } finally { setSearching(false); }
+  function startSSE() {
+    if (evtRef.current) return; // já tem busca rodando
+    setProgress({ stage: 'connecting', label: 'Conectando…' });
+
+    const url = api.searchStreamUrl(ws.id);
+    const es = new EventSource(url, { withCredentials: true });
+    evtRef.current = es;
+
+    es.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data);
+        setProgress(evt);
+        if (evt.stage === 'complete') {
+          if (evt.saved > 0) toast.success(`${evt.saved} oferta(s) salva(s) (${evt.scanned} analisadas)`);
+          else toast.info('Nenhuma oferta nova com seus filtros — tente relaxar os critérios');
+          es.close();
+          evtRef.current = null;
+          setTab('pending');
+          load();
+          setTimeout(() => setProgress(null), 3000);
+        } else if (evt.stage === 'fatal') {
+          toast.error(evt.error ?? 'Falha na busca');
+          es.close();
+          evtRef.current = null;
+          setTimeout(() => setProgress(null), 2000);
+        }
+      } catch {}
+    };
+    es.onerror = () => {
+      es.close();
+      evtRef.current = null;
+      setProgress((p) => p?.stage === 'complete' ? p : { stage: 'fatal', error: 'Conexão perdida' });
+      setTimeout(() => setProgress(null), 3000);
+    };
   }
+
+  function stopSSE() {
+    if (evtRef.current) {
+      evtRef.current.close();
+      evtRef.current = null;
+      setProgress(null);
+    }
+  }
+
+  useEffect(() => () => stopSSE(), []);
 
   async function addByUrl() {
     if (!manualUrl.trim()) return;
     setAddingUrl(true);
     try {
       await api.addOfferByUrl(ws.id, manualUrl.trim());
-      toast.success('Oferta adicionada com sucesso');
+      toast.success('Oferta adicionada');
       setManualUrl('');
       setTab('pending');
       load();
-    } catch (e) {
-      toast.error(e.message);
-    } finally { setAddingUrl(false); }
+    } catch (e) { toast.error(e.message); }
+    finally { setAddingUrl(false); }
   }
 
   async function approve(oid) {
     try {
       await api.approveOffer(ws.id, oid);
-      toast.success('Oferta aprovada e enviada ao grupo de staging');
+      toast.success('Oferta aprovada e enviada');
       load();
     } catch (e) { toast.error(e.message); }
   }
@@ -63,16 +97,17 @@ export default function OffersPanel({ ws }) {
     load();
   }
 
+  const running = !!evtRef.current;
+
   return (
     <div className="space-y-4">
-      {/* Adicionar oferta colando URL */}
+      {/* Adicionar oferta por URL manual */}
       <div className="card">
         <h3 className="font-semibold flex items-center gap-2 mb-2">
           <Icon.Plus /> Adicionar oferta por URL
         </h3>
         <p className="text-xs mb-3" style={{ color: 'rgb(var(--text-muted))' }}>
-          Cole o link de um produto do Mercado Livre que você quer divulgar. O sistema extrai os
-          dados, anexa sua tag de afiliado e adiciona às pendentes pra você revisar.
+          Cole o link de um produto do ML pra adicionar direto (sem scraping)
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <input
@@ -90,29 +125,31 @@ export default function OffersPanel({ ws }) {
         </div>
       </div>
 
+      {/* Tabs + busca */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="glass rounded-xl p-1 flex gap-1 overflow-x-auto">
           {TABS.map((t) => {
             const I = t.icon;
             const active = tab === t.id;
             return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`btn ${active ? 'btn-primary' : 'btn-ghost'} !py-1.5 !px-3 whitespace-nowrap`}
-              >
+              <button key={t.id} onClick={() => setTab(t.id)}
+                      className={`btn ${active ? 'btn-primary' : 'btn-ghost'} !py-1.5 !px-3 whitespace-nowrap`}>
                 <I width={14} height={14} />
                 {t.label}
               </button>
             );
           })}
         </div>
-        <button onClick={searchNow} disabled={searching} className="btn btn-secondary">
-          {searching ? <Icon.Loader width={14} height={14} /> : <Icon.Search width={14} height={14} />}
-          {searching ? 'Buscando…' : 'Buscar automaticamente'}
+        <button onClick={running ? stopSSE : startSSE} className="btn btn-secondary">
+          {running ? <Icon.X width={14} height={14} /> : <Icon.Search width={14} height={14} />}
+          {running ? 'Cancelar busca' : 'Buscar ofertas'}
         </button>
       </div>
 
+      {/* Progress bar SSE */}
+      {progress && <ProgressView progress={progress} />}
+
+      {/* Lista */}
       {loading ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3, 4, 5, 6].map((i) => <div key={i} className="card animate-pulse" style={{ height: 320 }} />)}
@@ -121,10 +158,10 @@ export default function OffersPanel({ ws }) {
         <div className="card text-center py-12">
           <Icon.Sparkles width={36} height={36} className="mx-auto mb-3 text-gradient" />
           <p style={{ color: 'rgb(var(--text-muted))' }}>
-            Nenhuma oferta {tab === 'pending' ? 'pendente' : tab === 'sent' ? 'enviada' : 'rejeitada'} ainda.
+            Nenhuma oferta {tab === 'pending' ? 'pendente' : tab === 'sent' ? 'enviada' : 'rejeitada'}.
           </p>
-          {tab === 'pending' && (
-            <button onClick={searchNow} className="btn btn-primary mt-4">
+          {tab === 'pending' && !running && (
+            <button onClick={startSSE} className="btn btn-primary mt-4">
               <Icon.Zap width={14} height={14} /> Buscar agora
             </button>
           )}
@@ -141,20 +178,77 @@ export default function OffersPanel({ ws }) {
   );
 }
 
+function ProgressView({ progress }) {
+  const { stage, current, total, source, page, totalPages, scanned, filtered, saved, error } = progress;
+
+  let label = '';
+  let percent = null;
+
+  if (stage === 'connecting' || stage === 'connected') {
+    label = 'Conectando…';
+    percent = 5;
+  } else if (stage === 'start') {
+    label = `Iniciando busca em ${total} fonte(s)…`;
+    percent = 10;
+  } else if (stage === 'source-start') {
+    label = `Fonte ${current}/${total}: ${source}`;
+    percent = 10 + ((current - 1) / total) * 80;
+  } else if (stage === 'page') {
+    label = `${source} — página ${page}/${totalPages} (${progress.found ?? 0} encontrados)`;
+    if (total) percent = 10 + ((current - 1 + (page / totalPages)) / total) * 80;
+  } else if (stage === 'source-done') {
+    label = `✓ ${source}: ${saved} salvas (${filtered}/${scanned} passaram filtros)`;
+    if (total) percent = 10 + (current / total) * 80;
+  } else if (stage === 'source-error') {
+    label = `⚠️ ${source}: ${error}`;
+  } else if (stage === 'complete') {
+    label = `Concluído — ${saved} oferta(s) nova(s) (${scanned} analisadas)`;
+    percent = 100;
+  } else if (stage === 'fatal') {
+    label = `Erro: ${error}`;
+  } else if (stage === 'error') {
+    label = progress.message ?? 'Erro';
+  }
+
+  const isError = stage === 'fatal' || stage === 'source-error' || stage === 'error';
+  const isDone = stage === 'complete';
+
+  return (
+    <div className="card animate-fade-in">
+      <div className="flex items-center gap-3 mb-3">
+        {isDone ? (
+          <Icon.Check className="text-emerald-400" width={18} height={18} />
+        ) : isError ? (
+          <Icon.X className="text-rose-400" width={18} height={18} />
+        ) : (
+          <Icon.Loader className="text-indigo-400 animate-spin" width={18} height={18} />
+        )}
+        <span className="text-sm font-medium flex-1">{label}</span>
+      </div>
+      {percent != null && (
+        <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'rgba(var(--bg-elevated), 0.8)' }}>
+          <div
+            className={`h-full rounded-full transition-all duration-300 ${isError ? 'bg-rose-500' : isDone ? 'bg-emerald-500' : 'bg-gradient-brand'}`}
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OfferCard({ offer, tab, onApprove, onReject }) {
   return (
     <div className="card card-hover !p-0 overflow-hidden flex flex-col">
       <div className="relative aspect-[4/3] overflow-hidden" style={{ background: 'rgba(var(--bg-elevated), 0.5)' }}>
-        <img src={offer.imageUrl} alt={offer.title} className="w-full h-full object-cover transition group-hover:scale-105" loading="lazy" />
+        <img src={offer.imageUrl} alt={offer.title} className="w-full h-full object-cover" loading="lazy" />
         {offer.discountPercent > 0 && (
           <span className="absolute top-2 left-2 badge !bg-rose-500 !text-white shadow-lg">
             -{offer.discountPercent}%
           </span>
         )}
         {offer.freeShipping && (
-          <span className="absolute top-2 right-2 badge badge-success">
-            🚚 frete grátis
-          </span>
+          <span className="absolute top-2 right-2 badge badge-success">🚚 frete grátis</span>
         )}
       </div>
       <div className="p-4 flex-1 flex flex-col">
@@ -167,14 +261,10 @@ function OfferCard({ offer, tab, onApprove, onReject }) {
           )}
           <span className="font-bold text-lg text-gradient">R$ {offer.price.toFixed(2)}</span>
         </div>
-        <div className="text-xs mb-3 flex flex-wrap gap-x-3 gap-y-1" style={{ color: 'rgb(var(--text-muted))' }}>
-          <span>{offer.soldQuantity} vendidos</span>
-          {offer.condition && <span>· {offer.condition}</span>}
-        </div>
         <a href={offer.affiliateUrl} target="_blank" rel="noreferrer"
-           className="text-xs flex items-center gap-1 mb-3 hover:text-gradient transition"
+           className="text-xs flex items-center gap-1 mb-3 hover:text-gradient transition truncate"
            style={{ color: 'rgb(var(--text-muted))' }}>
-          <Icon.ExternalLink width={12} height={12} /> Ver no ML
+          <Icon.ExternalLink width={12} height={12} /> Ver no ML (com sua tag)
         </a>
 
         <div className="mt-auto">
@@ -191,12 +281,12 @@ function OfferCard({ offer, tab, onApprove, onReject }) {
           {tab === 'sent' && offer.sentAt && (
             <div className="text-xs flex items-center gap-1" style={{ color: 'rgb(var(--text-muted))' }}>
               <Icon.Check width={12} height={12} className="text-emerald-400" />
-              Enviada em {new Date(offer.sentAt).toLocaleString('pt-BR')}
+              Enviada {new Date(offer.sentAt).toLocaleString('pt-BR')}
             </div>
           )}
           {tab === 'rejected' && (
             <div className="text-xs" style={{ color: 'rgb(var(--text-muted))' }}>
-              Rejeitada em {new Date(offer.createdAt).toLocaleString('pt-BR')}
+              Rejeitada {new Date(offer.createdAt).toLocaleString('pt-BR')}
             </div>
           )}
         </div>

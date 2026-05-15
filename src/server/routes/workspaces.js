@@ -4,8 +4,7 @@ import { waManager } from '../whatsapp/manager.js';
 import { formatOffer } from '../formatter.js';
 import { runWorkspace } from '../worker.js';
 import { audit } from '../audit.js';
-import { MLB_CATEGORIES, findCategory } from '../ml/categories.js';
-import { fetchItemByUrl } from '../ml/scraper.js';
+import { fetchItemByUrl, AVAILABLE_SOURCES } from '../ml/scraper.js';
 import { attachAffiliateTag } from '../ml/affiliate.js';
 import { getAffiliateTag } from '../ml/oauth.js';
 
@@ -119,7 +118,11 @@ router.get('/:id', async (req, res) => {
 });
 
 router.patch('/:id', async (req, res) => {
-  const allowed = ['name', 'niche', 'description', 'searchQuery', 'categoryIds', 'minDiscount', 'onlyFreeShipping', 'onlyDeals', 'maxPerRun', 'intervalMin', 'autoSearch'];
+  const allowed = [
+    'name', 'niche', 'description', 'searchQuery', 'categoryIds',
+    'minDiscount', 'onlyFreeShipping', 'onlyDeals', 'maxPerRun', 'intervalMin', 'autoSearch',
+    'keywords', 'priceMin', 'priceMax', 'cooldownDays',
+  ];
   const data = {};
   for (const k of allowed) if (k in (req.body ?? {})) data[k] = req.body[k];
   const ws = await prisma.workspace.update({ where: { id: req.params.id }, data });
@@ -195,56 +198,58 @@ router.delete('/:id/groups/:groupId', async (req, res) => {
   res.json({ ok: true });
 });
 
-// ---- Categorias monitoradas pelo workspace ----
+// ---- Fontes de scraping (URLs do ML que o bot vai varrer) ----
 
-// Lista as 30+ categorias top-level disponíveis no MLB
-router.get('/ml/categories', async (_req, res) => {
-  res.json(MLB_CATEGORIES);
+// Lista as fontes disponíveis (validadas empiricamente)
+router.get('/ml/sources', async (_req, res) => {
+  res.json(AVAILABLE_SOURCES);
 });
 
-router.get('/:id/categories', async (req, res) => {
-  const rows = await prisma.workspaceCategory.findMany({
+router.get('/:id/sources', async (req, res) => {
+  const rows = await prisma.workspaceSource.findMany({
     where: { workspaceId: req.params.id },
     orderBy: { createdAt: 'desc' },
   });
   res.json(rows);
 });
 
-router.post('/:id/categories', async (req, res) => {
-  const { categoryId } = req.body ?? {};
-  if (!categoryId) return res.status(400).json({ error: 'categoryId obrigatório' });
-  const cat = findCategory(categoryId);
-  if (!cat) return res.status(400).json({ error: 'Categoria desconhecida' });
+router.post('/:id/sources', async (req, res) => {
+  const { slug, maxPages } = req.body ?? {};
+  if (slug == null) return res.status(400).json({ error: 'slug obrigatório (pode ser string vazia)' });
+  const src = AVAILABLE_SOURCES.find((s) => s.slug === slug);
+  if (!src) return res.status(400).json({ error: 'Fonte desconhecida' });
   try {
-    const saved = await prisma.workspaceCategory.create({
+    const saved = await prisma.workspaceSource.create({
       data: {
         workspaceId: req.params.id,
-        categoryId: cat.id,
-        name: cat.name,
+        slug: src.slug,
+        label: src.label,
+        maxPages: maxPages ?? src.defaultPages,
       },
     });
-    audit('category.add', { entity: 'category', entityId: saved.id, workspaceId: req.params.id, payload: { name: cat.name } });
+    audit('source.add', { entity: 'source', entityId: saved.id, workspaceId: req.params.id, payload: { slug: src.slug } });
     res.status(201).json(saved);
   } catch (e) {
-    if (e.code === 'P2002') return res.status(409).json({ error: 'Categoria já cadastrada' });
+    if (e.code === 'P2002') return res.status(409).json({ error: 'Fonte já cadastrada' });
     res.status(400).json({ error: e.message });
   }
 });
 
-router.patch('/:id/categories/:rowId', async (req, res) => {
-  const { enabled } = req.body ?? {};
+router.patch('/:id/sources/:rowId', async (req, res) => {
+  const { enabled, maxPages } = req.body ?? {};
   const data = {};
   if (typeof enabled === 'boolean') data.enabled = enabled;
-  const row = await prisma.workspaceCategory.update({
+  if (typeof maxPages === 'number') data.maxPages = Math.max(1, Math.min(10, maxPages));
+  const row = await prisma.workspaceSource.update({
     where: { id: req.params.rowId },
     data,
   });
   res.json(row);
 });
 
-router.delete('/:id/categories/:rowId', async (req, res) => {
-  await prisma.workspaceCategory.delete({ where: { id: req.params.rowId } });
-  audit('category.remove', { entity: 'category', entityId: req.params.rowId, workspaceId: req.params.id });
+router.delete('/:id/sources/:rowId', async (req, res) => {
+  await prisma.workspaceSource.delete({ where: { id: req.params.rowId } });
+  audit('source.remove', { entity: 'source', entityId: req.params.rowId, workspaceId: req.params.id });
   res.json({ ok: true });
 });
 
@@ -284,17 +289,48 @@ router.post('/:id/offers/add-by-url', async (req, res) => {
   }
 });
 
-// Buscar ofertas agora (manual)
+// Buscar ofertas agora (manual, sem streaming)
 router.post('/:id/search', async (req, res) => {
   const ws = await prisma.workspace.findUnique({ where: { id: req.params.id } });
   if (!ws) return res.status(404).json({ error: 'not found' });
   try {
-    const saved = await runWorkspace(ws);
-    audit('offer.search', { entity: 'offer', workspaceId: ws.id, payload: { saved } });
-    res.json({ ok: true, saved });
+    const result = await runWorkspace(ws);
+    audit('offer.search', { entity: 'offer', workspaceId: ws.id, payload: result });
+    res.json({ ok: true, ...result });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// Buscar com SSE streaming (progress bar real-time)
+router.get('/:id/search/stream', async (req, res) => {
+  const ws = await prisma.workspace.findUnique({ where: { id: req.params.id } });
+  if (!ws) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  const send = (data) => {
+    try { res.write(`data: ${JSON.stringify(data)}\n\n`); }
+    catch {}
+  };
+
+  send({ stage: 'connected' });
+
+  try {
+    const result = await runWorkspace(ws, send);
+    audit('offer.search', { entity: 'offer', workspaceId: ws.id, payload: result });
+    send({ stage: 'complete', ...result });
+  } catch (e) {
+    send({ stage: 'fatal', error: e.message });
+  }
+  res.end();
 });
 
 // Ofertas (inbox)

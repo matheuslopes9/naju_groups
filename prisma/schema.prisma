@@ -8,44 +8,51 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Cada "workspace" = 1 nicho = 1 número WhatsApp + N grupos
+// Cada "workspace" = 1 nicho = 1 número WhatsApp + N grupos + N fontes de scraping
 model Workspace {
   id           String   @id @default(cuid())
   name         String
   niche        String?
   description  String?
   searchQuery  String?  @map("search_query")
-  categoryIds  String?  @map("category_ids") // CSV
+  categoryIds  String?  @map("category_ids") // CSV (legado, não usado)
+  // Filtros de oferta
   minDiscount  Int      @default(20) @map("min_discount")
   onlyFreeShipping Boolean @default(true) @map("only_free_shipping")
   onlyDeals    Boolean  @default(true) @map("only_deals")
   maxPerRun    Int      @default(3) @map("max_per_run")
-  intervalMin  Int      @default(60) @map("interval_min") // a cada quantos min buscar
+  intervalMin  Int      @default(60) @map("interval_min")
   autoSearch   Boolean  @default(false) @map("auto_search")
+  // Filtros novos
+  keywords     String?  // CSV de palavras-chave para casar com title (case-insensitive)
+  priceMin     Float?   @map("price_min")
+  priceMax     Float?   @map("price_max")
+  cooldownDays Int      @default(30) @map("cooldown_days")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   whatsappSession WhatsappSession?
   groups          Group[]
   offers          Offer[]
-  categories      WorkspaceCategory[]
+  sources         WorkspaceSource[]
 
   @@map("workspaces")
 }
 
-// Categorias do ML que o workspace monitora.
-// Bot busca anúncios via GET /sites/MLB/search?category=$ID&shipping_cost=free
-model WorkspaceCategory {
+// Fontes de scraping (URLs da página de ofertas que o bot vai varrer).
+// Ex: /ofertas (geral), /ofertas/supermercado, /ofertas/informatica
+model WorkspaceSource {
   id          String   @id @default(cuid())
   workspaceId String   @map("workspace_id")
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  categoryId  String   @map("category_id") // ex: MLB1246 (Beleza)
-  name        String   // nome friendly pra UI
+  slug        String   // '', 'supermercado', 'informatica', 'digitais'
+  label       String   // 'Ofertas Gerais', 'Supermercado'
+  maxPages    Int      @default(3) @map("max_pages")
   enabled     Boolean  @default(true)
   createdAt   DateTime @default(now()) @map("created_at")
 
-  @@unique([workspaceId, categoryId])
-  @@map("workspace_categories")
+  @@unique([workspaceId, slug])
+  @@map("workspace_sources")
 }
 
 model WhatsappSession {
@@ -101,6 +108,7 @@ model Offer {
 
   @@unique([workspaceId, productId])
   @@index([workspaceId, status])
+  @@index([productId, workspaceId, createdAt])
   @@map("offers")
 }
 

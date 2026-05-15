@@ -54,12 +54,15 @@ export const api = {
   addGroup: (id, data) => request(`/api/workspaces/${id}/groups`, { method: 'POST', body: JSON.stringify(data) }),
   deleteGroup: (id, gid) => request(`/api/workspaces/${id}/groups/${gid}`, { method: 'DELETE' }),
 
-  // Categorias monitoradas
-  mlCategories: () => request('/api/workspaces/ml/categories'),
-  listCategories: (id) => request(`/api/workspaces/${id}/categories`),
-  addCategory: (id, categoryId) => request(`/api/workspaces/${id}/categories`, { method: 'POST', body: JSON.stringify({ categoryId }) }),
-  toggleCategory: (id, rowId, enabled) => request(`/api/workspaces/${id}/categories/${rowId}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
-  deleteCategory: (id, rowId) => request(`/api/workspaces/${id}/categories/${rowId}`, { method: 'DELETE' }),
+  // Fontes de scraping
+  availableSources: () => request('/api/workspaces/ml/sources'),
+  listSources: (id) => request(`/api/workspaces/${id}/sources`),
+  addSource: (id, slug, maxPages) => request(`/api/workspaces/${id}/sources`, { method: 'POST', body: JSON.stringify({ slug, maxPages }) }),
+  updateSource: (id, rowId, data) => request(`/api/workspaces/${id}/sources/${rowId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteSource: (id, rowId) => request(`/api/workspaces/${id}/sources/${rowId}`, { method: 'DELETE' }),
+
+  // Search com SSE - retorna URL pra EventSource
+  searchStreamUrl: (id) => `/api/workspaces/${id}/search/stream`,
 
   // Offers
   searchNow: (id) => request(`/api/workspaces/${id}/search`, { method: 'POST' }),
