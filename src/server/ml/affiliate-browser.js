@@ -16,7 +16,7 @@ import { chromium } from 'playwright-core';
 import { prisma } from '../db.js';
 import { encrypt, decrypt } from '../crypto.js';
 
-const GENERATOR_URL = 'https://www.mercadolivre.com.br/afiliados/criar-link';
+const GENERATOR_URL = 'https://www.mercadolivre.com.br/afiliados/linkbuilder';
 const STORAGE_DIR = './auth_state/affiliate';
 
 // Localiza o Chromium do sistema (no Docker vamos instalar via apt; em dev
@@ -124,7 +124,18 @@ export async function importCookies(cookiesJson) {
   if (filtered.length === 0) {
     throw new Error('Nenhum cookie de mercadolivre.com.br encontrado');
   }
-  // Normaliza para o formato do Playwright
+  // Normaliza para o formato do Playwright.
+  // Playwright só aceita sameSite: "Strict" | "Lax" | "None".
+  // Cookie-Editor exporta variantes como "no_restriction", "lax", "unspecified",
+  // null, "" — precisa normalizar tudo.
+  function normalizeSameSite(s) {
+    const v = String(s ?? '').toLowerCase();
+    if (v === 'strict') return 'Strict';
+    if (v === 'lax') return 'Lax';
+    if (v === 'none' || v === 'no_restriction') return 'None';
+    // unspecified, null, vazio, qualquer outro → Lax (default seguro)
+    return 'Lax';
+  }
   const normalized = filtered.map((c) => ({
     name: c.name,
     value: c.value,
@@ -133,9 +144,7 @@ export async function importCookies(cookiesJson) {
     expires: c.expirationDate ?? c.expires ?? -1,
     httpOnly: c.httpOnly ?? false,
     secure: c.secure ?? true,
-    sameSite: (c.sameSite === 'no_restriction' || c.sameSite === 'unspecified')
-      ? 'Lax'
-      : (c.sameSite ?? 'Lax'),
+    sameSite: normalizeSameSite(c.sameSite),
   }));
   await saveCookies(normalized);
   // Verifica de cara

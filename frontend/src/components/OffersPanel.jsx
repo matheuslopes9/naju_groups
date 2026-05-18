@@ -289,7 +289,7 @@ function OfferCard({ offer, tab, onApprove, onReject, onSetShortlink }) {
     try {
       await navigator.clipboard.writeText(offer.permalink);
       toast.success('URL copiada — cole no portal de afiliados');
-      window.open('https://www.mercadolivre.com.br/afiliados/criar-link', '_blank', 'noopener');
+      window.open('https://www.mercadolivre.com.br/afiliados/linkbuilder', '_blank', 'noopener');
     } catch {
       toast.error('Falha ao copiar — selecione manualmente');
     }

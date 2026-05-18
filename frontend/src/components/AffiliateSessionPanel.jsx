@@ -117,7 +117,7 @@ export default function AffiliateSessionPanel() {
         <div className="mt-3 space-y-3">
           <ol className="list-decimal pl-5 space-y-1 text-sm" style={{ color: 'rgb(var(--text-secondary))' }}>
             <li>No seu Chrome/Brave, instale a extensão <strong>"Cookie-Editor"</strong></li>
-            <li>Acesse <a href="https://www.mercadolivre.com.br/afiliados/criar-link" target="_blank" rel="noreferrer" className="text-gradient hover:underline">afiliados.mercadolivre.com.br</a> e <strong>faça login</strong></li>
+            <li>Acesse <a href="https://www.mercadolivre.com.br/afiliados/linkbuilder" target="_blank" rel="noreferrer" className="text-gradient hover:underline">afiliados.mercadolivre.com.br</a> e <strong>faça login</strong></li>
             <li>Confirme que vê o gerador de links (não redirecionou pra login)</li>
             <li>Clique no ícone da extensão Cookie-Editor</li>
             <li>Clique em <strong>Export → Export as JSON</strong></li>
