@@ -111,6 +111,15 @@ export default function OffersPanel({ ws }) {
     } catch (e) { toast.error(e.message); }
   }
 
+  async function resetHistory() {
+    if (!confirm('Apagar TODAS as ofertas (pending, sent, rejected) deste workspace? Isso libera o cooldown — produtos já vistos voltam a aparecer.')) return;
+    try {
+      const r = await api.resetOffers(ws.id, 'all');
+      toast.success(`${r.deleted} oferta(s) removida(s) — cooldown limpo`);
+      load();
+    } catch (e) { toast.error(e.message); }
+  }
+
   const running = !!evtRef.current;
 
   return (
@@ -154,10 +163,16 @@ export default function OffersPanel({ ws }) {
             );
           })}
         </div>
-        <button onClick={running ? stopSSE : startSSE} className="btn btn-secondary">
-          {running ? <Icon.X width={14} height={14} /> : <Icon.Search width={14} height={14} />}
-          {running ? 'Cancelar busca' : 'Buscar ofertas'}
-        </button>
+        <div className="flex gap-2">
+          <button onClick={resetHistory} className="btn btn-ghost !text-xs !text-rose-400"
+                  title="Apaga histórico — libera o cooldown">
+            <Icon.Trash width={12} height={12} /> Resetar
+          </button>
+          <button onClick={running ? stopSSE : startSSE} className="btn btn-secondary">
+            {running ? <Icon.X width={14} height={14} /> : <Icon.Search width={14} height={14} />}
+            {running ? 'Cancelar busca' : 'Buscar ofertas'}
+          </button>
+        </div>
       </div>
 
       {/* Progress bar SSE */}

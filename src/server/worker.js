@@ -81,15 +81,17 @@ export async function runWorkspace(ws, onProgress) {
     });
 
     // Filtragem (após enriquecimento pra UI mostrar estatística mesmo se filtrado)
+    const filterStats = { discount: 0, freeShipping: 0, deals: 0, priceMin: 0, priceMax: 0, keywords: 0 };
     const filtered = enriched.filter((o) => {
-      if (o.discountPercent < (ws.minDiscount ?? 0)) return false;
-      if (ws.onlyFreeShipping && !o.freeShipping) return false;
-      if (ws.onlyDeals && !o.originalPrice) return false;
-      if (ws.priceMin != null && o.price < ws.priceMin) return false;
-      if (ws.priceMax != null && o.price > ws.priceMax) return false;
-      if (!matchKeywords(o, ws.keywords)) return false;
+      if (o.discountPercent < (ws.minDiscount ?? 0)) { filterStats.discount++; return false; }
+      if (ws.onlyFreeShipping && !o.freeShipping) { filterStats.freeShipping++; return false; }
+      if (ws.onlyDeals && !o.originalPrice) { filterStats.deals++; return false; }
+      if (ws.priceMin != null && o.price < ws.priceMin) { filterStats.priceMin++; return false; }
+      if (ws.priceMax != null && o.price > ws.priceMax) { filterStats.priceMax++; return false; }
+      if (!matchKeywords(o, ws.keywords)) { filterStats.keywords++; return false; }
       return true;
     });
+    console.log(`   [${source.label}] descartados:`, Object.entries(filterStats).filter(([_, v]) => v > 0).map(([k, v]) => `${k}=${v}`).join(', ') || '(nada descartado)');
 
     // Ordena por score (rentabilidade alta primeiro), com jitter aleatório pra variar
     const scored = filtered.sort((a, b) => (b.score - a.score) + (Math.random() - 0.5) * 5);
@@ -105,6 +107,9 @@ export async function runWorkspace(ws, onProgress) {
       select: { productId: true },
     }) : [];
     const recentSet = new Set(recent.map((r) => r.productId));
+    if (recent.length > 0) {
+      console.log(`   [${source.label}] ${recent.length} produtos no cooldown (já vistos nos últimos ${ws.cooldownDays}d)`);
+    }
 
     let savedThisSource = 0;
     for (const o of scored) {

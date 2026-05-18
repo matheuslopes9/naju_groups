@@ -134,6 +134,22 @@ router.patch('/:id', async (req, res) => {
   res.json(ws);
 });
 
+// Limpa histórico de ofertas do workspace (reset cooldown)
+// Aceita ?status=pending|sent|rejected|all (default: all)
+router.post('/:id/offers/reset', async (req, res) => {
+  const status = (req.query.status ?? 'all').toString();
+  const where = { workspaceId: req.params.id };
+  if (status !== 'all') where.status = status;
+  const result = await prisma.offer.deleteMany({ where });
+  audit('offer.reset', {
+    entity: 'workspace',
+    entityId: req.params.id,
+    workspaceId: req.params.id,
+    payload: { deleted: result.count, status },
+  });
+  res.json({ ok: true, deleted: result.count });
+});
+
 router.delete('/:id', async (req, res) => {
   await waManager.stop(req.params.id).catch(() => {});
   await prisma.workspace.delete({ where: { id: req.params.id } });

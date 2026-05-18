@@ -67,6 +67,7 @@ export const api = {
 
   // Search com SSE - retorna URL pra EventSource
   searchStreamUrl: (id) => `/api/workspaces/${id}/search/stream`,
+  resetOffers: (id, status = 'all') => request(`/api/workspaces/${id}/offers/reset?status=${status}`, { method: 'POST' }),
 
   // Offers
   searchNow: (id) => request(`/api/workspaces/${id}/search`, { method: 'POST' }),
