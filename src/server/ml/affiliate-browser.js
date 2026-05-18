@@ -162,6 +162,30 @@ export async function generateShortlink(productUrl) {
     console.log(`   🔗 generateShortlink iniciando para ${productUrl.slice(0, 80)}…`);
     ctx = await newContext();
     const page = await ctx.newPage();
+
+    // ESTRATÉGIA ROBUSTA: intercepta TODAS as responses da rede e procura
+    // qualquer URL com /sec/ ou JSON que retorne shortlink. Mais resiliente
+    // a mudanças de HTML do portal.
+    const shortlinks = new Set();
+    const collectShortlink = async (response) => {
+      const url = response.url();
+      // 1. URL da própria response é um shortlink
+      if (url.includes('/sec/')) {
+        shortlinks.add(url);
+        return;
+      }
+      // 2. JSON response com shortlink dentro
+      const ct = response.headers()['content-type'] ?? '';
+      if (ct.includes('json')) {
+        try {
+          const body = await response.text();
+          const m = body.match(/https?:\/\/[^"\s]*\/sec\/[A-Za-z0-9]+/);
+          if (m) shortlinks.add(m[0]);
+        } catch {}
+      }
+    };
+    page.on('response', collectShortlink);
+
     await page.goto(GENERATOR_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
     if (page.url().includes('/login') || page.url().includes('/identification')) {
@@ -169,30 +193,90 @@ export async function generateShortlink(productUrl) {
       throw new Error('Sessão expirou — refaça login');
     }
 
-    // Tenta achar o textarea de input do gerador
-    const textareaSelector = 'textarea, input[type="text"][placeholder*="URL"], input[name*="url"]';
-    await page.waitForSelector(textareaSelector, { timeout: 15000 });
-    await page.fill(textareaSelector, productUrl);
+    // Tenta achar o textarea/input do gerador (vários seletores possíveis)
+    const inputSelectors = [
+      'textarea',
+      'input[type="url"]',
+      'input[type="text"][placeholder*="URL" i]',
+      'input[type="text"][placeholder*="url" i]',
+      'input[name*="url" i]',
+      'input[name*="link" i]',
+      'input[placeholder*="produto" i]',
+      'input[placeholder*="cole" i]',
+    ];
+    let filled = false;
+    for (const sel of inputSelectors) {
+      try {
+        const el = page.locator(sel).first();
+        if (await el.count() > 0) {
+          await el.fill(productUrl, { timeout: 5000 });
+          filled = true;
+          console.log(`   ✓ campo preenchido com seletor: ${sel}`);
+          break;
+        }
+      } catch {}
+    }
+    if (!filled) throw new Error('Não achei campo de URL no gerador (HTML pode ter mudado)');
 
-    // Botão "Gerar"
-    const btn = await page.locator('button:has-text("Gerar"), button[type="submit"]').first();
-    await btn.click();
+    // Botão "Gerar" (vários textos possíveis)
+    const btnSelectors = [
+      'button:has-text("Gerar")',
+      'button:has-text("Criar")',
+      'button:has-text("Compartilhar")',
+      'button[type="submit"]',
+      'button:has-text("Gerar link")',
+    ];
+    let clicked = false;
+    for (const sel of btnSelectors) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.count() > 0) {
+          await btn.click({ timeout: 5000 });
+          clicked = true;
+          console.log(`   ✓ botão clicado: ${sel}`);
+          break;
+        }
+      } catch {}
+    }
+    if (!clicked) throw new Error('Não achei botão Gerar');
 
-    // Aguarda aparecer o link gerado (.../sec/...)
-    const shortlinkSelector = 'a[href*="/sec/"], input[value*="/sec/"], [data-testid*="link"]';
-    await page.waitForSelector(shortlinkSelector, { timeout: 20000 });
-
-    // Tenta extrair href ou value
-    const link = await page.evaluate(() => {
+    // Aguarda link aparecer. Tenta 3 caminhos em paralelo:
+    //   1. Network intercept (preferido)
+    //   2. Anchor href com /sec/
+    //   3. Input com value contendo /sec/
+    //   4. Texto da página que match URL ML/sec/
+    const linkFromPage = page.waitForFunction(() => {
       const anchor = document.querySelector('a[href*="/sec/"]');
       if (anchor) return anchor.href;
       const input = document.querySelector('input[value*="/sec/"]');
       if (input) return input.value;
+      const txt = document.body.innerText;
+      const m = txt.match(/https?:\/\/[^\s"]*\/sec\/[A-Za-z0-9]+/);
+      if (m) return m[0];
       return null;
-    });
+    }, null, { timeout: 25000 });
 
-    if (!link) throw new Error('Não consegui extrair o shortlink (HTML mudou?)');
-    console.log(`   ✅ shortlink gerado em ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+    // Race: o que vier primeiro entre o intercept de rede e a DOM
+    const networkWait = (async () => {
+      for (let i = 0; i < 50; i++) {
+        if (shortlinks.size > 0) return Array.from(shortlinks)[0];
+        await page.waitForTimeout(500);
+      }
+      return null;
+    })();
+
+    const link = await Promise.race([
+      linkFromPage.then((handle) => handle?.jsonValue?.() ?? null),
+      networkWait,
+    ]);
+
+    if (!link) {
+      // último recurso: salva o HTML pra diagnóstico
+      const debugHtml = await page.content();
+      console.warn(`   📋 HTML do gerador (primeiros 500 chars): ${debugHtml.slice(0, 500)}`);
+      throw new Error('Não consegui extrair o shortlink em 25s — HTML do portal pode ter mudado');
+    }
+    console.log(`   ✅ shortlink gerado em ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${link}`);
     return link;
   } catch (e) {
     console.warn(`   ❌ generateShortlink falhou em ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${e.message}`);
