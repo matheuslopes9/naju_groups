@@ -88,7 +88,7 @@ export async function checkSession() {
     await setStatus('checking');
     ctx = await newContext();
     const page = await ctx.newPage();
-    const res = await page.goto(GENERATOR_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const res = await page.goto(GENERATOR_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
     const finalUrl = page.url();
     const loggedIn = !finalUrl.includes('/login') && !finalUrl.includes('/identification');
     await setStatus(loggedIn ? 'connected' : 'disconnected');
@@ -157,10 +157,12 @@ export async function importCookies(cookiesJson) {
  */
 export async function generateShortlink(productUrl) {
   let ctx;
+  const startedAt = Date.now();
   try {
+    console.log(`   🔗 generateShortlink iniciando para ${productUrl.slice(0, 80)}…`);
     ctx = await newContext();
     const page = await ctx.newPage();
-    await page.goto(GENERATOR_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(GENERATOR_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
     if (page.url().includes('/login') || page.url().includes('/identification')) {
       await setStatus('disconnected', 'redirecionado pra login');
@@ -169,7 +171,7 @@ export async function generateShortlink(productUrl) {
 
     // Tenta achar o textarea de input do gerador
     const textareaSelector = 'textarea, input[type="text"][placeholder*="URL"], input[name*="url"]';
-    await page.waitForSelector(textareaSelector, { timeout: 10000 });
+    await page.waitForSelector(textareaSelector, { timeout: 15000 });
     await page.fill(textareaSelector, productUrl);
 
     // Botão "Gerar"
@@ -178,7 +180,7 @@ export async function generateShortlink(productUrl) {
 
     // Aguarda aparecer o link gerado (.../sec/...)
     const shortlinkSelector = 'a[href*="/sec/"], input[value*="/sec/"], [data-testid*="link"]';
-    await page.waitForSelector(shortlinkSelector, { timeout: 15000 });
+    await page.waitForSelector(shortlinkSelector, { timeout: 20000 });
 
     // Tenta extrair href ou value
     const link = await page.evaluate(() => {
@@ -190,7 +192,11 @@ export async function generateShortlink(productUrl) {
     });
 
     if (!link) throw new Error('Não consegui extrair o shortlink (HTML mudou?)');
+    console.log(`   ✅ shortlink gerado em ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
     return link;
+  } catch (e) {
+    console.warn(`   ❌ generateShortlink falhou em ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${e.message}`);
+    throw e;
   } finally {
     if (ctx) await ctx.close();
   }

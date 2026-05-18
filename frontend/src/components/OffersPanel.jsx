@@ -90,16 +90,18 @@ export default function OffersPanel({ ws }) {
   }
 
   async function approve(oid) {
+    toast.info('Aprovando…');
     try {
-      await api.approveOffer(ws.id, oid);
-      toast.success('Oferta aprovada e enviada');
+      const res = await api.approveOffer(ws.id, oid);
+      toast.success('Oferta aprovada e enviada ✅');
+      console.log('[approve] OK', res);
       load();
     } catch (e) {
-      // Se erro pediu shortlink, foca atenção no card
+      console.error('[approve] FALHOU', e);
       if (e.message?.includes('shortlink')) {
         toast.error('Cole o shortlink oficial antes de aprovar');
       } else {
-        toast.error(e.message);
+        toast.error(`Erro: ${e.message}`);
       }
     }
   }
@@ -205,7 +207,7 @@ export default function OffersPanel({ ws }) {
           {offers.map((o) => (
             <OfferCard key={o.id} offer={o} tab={tab}
               affSessionConnected={affSession?.status === 'connected'}
-              onApprove={() => approve(o.id)}
+              onApprove={() => { console.log('[click] Aprovar', o.id); approve(o.id); }}
               onReject={() => reject(o.id)}
               onSetShortlink={(sl) => setShortlink(o.id, sl)} />
           ))}
@@ -288,8 +290,9 @@ function OfferCard({ offer, tab, affSessionConnected, onApprove, onReject, onSet
   const commission = offer.estimatedCommission;
   const scoreColor = (offer.score ?? 0) >= 70 ? 'badge-success' : (offer.score ?? 0) >= 50 ? 'badge-warning' : 'badge-muted';
   const hasShortlink = !!offer.shortlink;
-  // Pode aprovar se já tem shortlink OU se sessão de afiliado tá conectada (gera on demand)
-  const canApprove = hasShortlink || affSessionConnected;
+  // Aprovar sempre permitido — o backend decide se gera shortlink ou exige manual.
+  // Se desabilitarmos no front, usuário fica sem feedback. Sempre ativo + backend retorna 400 claro.
+  const canApprove = true;
   const [shortlinkDraft, setShortlinkDraft] = useState('');
   const [editing, setEditing] = useState(false);
 
