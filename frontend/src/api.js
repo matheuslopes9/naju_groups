@@ -33,6 +33,10 @@ export const api = {
   mlAppSave: (data) => request('/api/ml/app', { method: 'POST', body: JSON.stringify(data) }),
   mlAppDelete: () => request('/api/ml/app', { method: 'DELETE' }),
   mlTest: () => request('/api/ml/test'),
+  affiliateSessionGet: () => request('/api/affiliate/session'),
+  affiliateSessionImport: (cookies) => request('/api/affiliate/session/import', { method: 'POST', body: JSON.stringify({ cookies }) }),
+  affiliateSessionCheck: () => request('/api/affiliate/session/check', { method: 'POST' }),
+  affiliateSessionDisconnect: () => request('/api/affiliate/session/disconnect', { method: 'POST' }),
 
   // Workspaces
   listWorkspaces: () => request('/api/workspaces'),

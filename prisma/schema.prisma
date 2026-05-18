@@ -24,10 +24,14 @@ model Workspace {
   intervalMin  Int      @default(60) @map("interval_min")
   autoSearch   Boolean  @default(false) @map("auto_search")
   // Filtros novos
-  keywords     String?  // CSV de palavras-chave para casar com title (case-insensitive)
+  keywords     String?
   priceMin     Float?   @map("price_min")
   priceMax     Float?   @map("price_max")
   cooldownDays Int      @default(30) @map("cooldown_days")
+  // Auto-aprovação (agente IA)
+  autoApproveEnabled   Boolean @default(false) @map("auto_approve_enabled")
+  autoApproveThreshold Int     @default(80) @map("auto_approve_threshold")
+  autoApproveMaxDaily  Int     @default(10) @map("auto_approve_max_daily")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -156,6 +160,34 @@ model AuthSession {
   expiresAt DateTime @map("expires_at")
 
   @@map("auth_sessions")
+}
+
+// Sessão headless do Playwright pro portal de afiliados ML.
+// Singleton (id=1). Cookies criptografados.
+model AffiliateSession {
+  id          Int       @id @default(1)
+  cookiesEnc  String?   @map("cookies_enc") // AES-256-GCM JSON dos cookies do Playwright
+  status      String    @default("disconnected") // disconnected | connected | checking | error
+  lastCheckAt DateTime? @map("last_check_at")
+  lastError   String?   @map("last_error")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("affiliate_sessions")
+}
+
+// Log do agente IA — decisões automáticas
+model AgentAction {
+  id          String   @id @default(cuid())
+  workspaceId String?  @map("workspace_id")
+  offerId     String?  @map("offer_id")
+  action      String   // approve | reject | skip | error
+  reason      String?
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt])
+  @@index([createdAt])
+  @@map("agent_actions")
 }
 
 // Log de ações importantes (auditoria)

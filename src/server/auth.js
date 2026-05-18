@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from './db.js';
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 dias
-const COOKIE_NAME = 'naju_session';
+const COOKIE_NAME = 'admanager_session';
 
 /**
  * Suporta dois modos:

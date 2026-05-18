@@ -54,10 +54,10 @@ export default function Login({ onSuccess }) {
             </div>
             <div className="text-center">
               <h1 className="text-3xl font-bold tracking-tight">
-                Naju<span className="text-gradient">Groups</span>
+                Ad<span className="text-gradient">Manager</span>
               </h1>
               <p className="text-sm mt-1" style={{ color: 'rgb(var(--text-muted))' }}>
-                Painel administrativo · Beauty Club
+                Gerenciador de Anúncios · Painel admin
               </p>
             </div>
           </div>

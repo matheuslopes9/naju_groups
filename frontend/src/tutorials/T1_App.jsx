@@ -105,7 +105,7 @@ export default function T1_App() {
 
       <Step n={8} title="Cadastrar dados no dashboard (Configurações)">
         <p>
-          Volta no Naju Groups e abre <strong>Configurações</strong> no menu (ou
+          Volta no AdManager e abre <strong>Configurações</strong> no menu (ou
           <a href="/configuracoes" className="text-gradient hover:underline"> clica aqui</a>).
           Preencha:
         </p>

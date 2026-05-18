@@ -9,7 +9,7 @@ import { getAccessToken } from './oauth.js';
 
 const ML_API = 'https://api.mercadolibre.com';
 const SITE_ID = 'MLB';
-const APP_UA = 'NajuGroups/0.2';
+const APP_UA = 'AdManager/0.3';
 
 async function mlFetch(path, opts = {}) {
   const token = await getAccessToken();

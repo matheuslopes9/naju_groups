@@ -104,7 +104,7 @@ class WhatsappManager extends EventEmitter {
       auth: state,
       logger,
       printQRInTerminal: false,
-      browser: ['NajuGroups', 'Chrome', '1.0'],
+      browser: ['AdManager', 'Chrome', '1.0'],
       // não baixa histórico de mensagens (mais leve, evita timeouts no init)
       syncFullHistory: false,
       shouldSyncHistoryMessage: () => false,

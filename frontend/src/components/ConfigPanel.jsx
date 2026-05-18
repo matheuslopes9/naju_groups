@@ -158,8 +158,8 @@ export default function ConfigPanel({ ws, reload }) {
       <Section
         number={3}
         title="Busca automática"
-        helper={`Bot roda a cada ${ws.intervalMin} min. Ofertas novas viram pendentes (nada é enviado a grupo sem você aprovar).`}
-        icon={Icon.Zap}
+        helper={`Bot roda a cada ${ws.intervalMin} min. Sem auto-aprovação, ofertas viram pendentes pra você revisar.`}
+        icon={Icon.RefreshCw}
       >
         <div className="flex items-center gap-3">
           <Toggle checked={auto} onChange={toggleAuto} />
@@ -168,7 +168,87 @@ export default function ConfigPanel({ ws, reload }) {
           </span>
         </div>
       </Section>
+
+      {/* PASSO 4 - Agente IA / Auto-aprovação */}
+      <AutoApproveSection ws={ws} reload={reload} />
     </div>
+  );
+}
+
+function AutoApproveSection({ ws, reload }) {
+  const [enabled, setEnabled] = useState(ws.autoApproveEnabled ?? false);
+  const [threshold, setThreshold] = useState(ws.autoApproveThreshold ?? 80);
+  const [maxDaily, setMaxDaily] = useState(ws.autoApproveMaxDaily ?? 10);
+
+  async function saveField(key, value) {
+    try {
+      await api.updateWorkspace(ws.id, { [key]: value });
+      reload();
+    } catch (e) { toast.error(e.message); }
+  }
+
+  async function toggleEnabled(v) {
+    setEnabled(v);
+    try {
+      await api.updateWorkspace(ws.id, { autoApproveEnabled: v });
+      toast.success(v ? 'Agente IA ativado — ofertas com score alto serão aprovadas automaticamente' : 'Agente IA desativado');
+      reload();
+    } catch (e) { toast.error(e.message); setEnabled(!v); }
+  }
+
+  return (
+    <Section
+      number={4}
+      title="🤖 Agente IA (auto-aprovação)"
+      helper="Quando ligado, ofertas com score >= threshold são aprovadas, têm shortlink gerado automaticamente e enviadas pros grupos. EXIGE sessão de afiliado conectada em Configurações."
+      icon={Icon.Sparkles}
+    >
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Toggle checked={enabled} onChange={toggleEnabled} />
+          <span className="text-sm" style={{ color: 'rgb(var(--text-muted))' }}>
+            {enabled ? '🤖 Agente ativo' : 'Agente desativado'}
+          </span>
+        </div>
+
+        {enabled && (
+          <div className="grid sm:grid-cols-2 gap-4 animate-fade-in">
+            <label className="block">
+              <span className="block text-sm font-medium mb-1.5">Score mínimo para aprovar</span>
+              <input
+                type="number" min="0" max="100"
+                value={threshold}
+                onChange={(e) => setThreshold(Number(e.target.value))}
+                onBlur={() => saveField('autoApproveThreshold', threshold)}
+                className="input"
+              />
+              <p className="text-xs mt-1" style={{ color: 'rgb(var(--text-muted))' }}>
+                0-100. Recomendado: 80+ (só ofertas top). Quanto menor, mais agressivo.
+              </p>
+            </label>
+            <label className="block">
+              <span className="block text-sm font-medium mb-1.5">Máximo por dia</span>
+              <input
+                type="number" min="1" max="100"
+                value={maxDaily}
+                onChange={(e) => setMaxDaily(Number(e.target.value))}
+                onBlur={() => saveField('autoApproveMaxDaily', maxDaily)}
+                className="input"
+              />
+              <p className="text-xs mt-1" style={{ color: 'rgb(var(--text-muted))' }}>
+                Limite de aprovações automáticas. Evita spam no grupo.
+              </p>
+            </label>
+          </div>
+        )}
+
+        {enabled && (
+          <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(244,63,94,0.08)', color: 'rgb(244,63,94)' }}>
+            ⚠️ <strong>Risco de ban:</strong> Auto-aprovação viola cláusula 1.9 dos Termos do programa de afiliados ML (proíbe automação). Use por sua conta e risco.
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }
 

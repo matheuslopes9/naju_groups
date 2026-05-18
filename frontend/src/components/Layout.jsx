@@ -78,10 +78,10 @@ export default function Layout({ children }) {
               <Logo size={32} />
               <div className="hidden sm:block leading-tight">
                 <div className="font-bold tracking-tight">
-                  Naju<span className="text-gradient">Groups</span>
+                  Ad<span className="text-gradient">Manager</span>
                 </div>
                 <div className="text-[10px] uppercase tracking-widest" style={{ color: 'rgb(var(--text-muted))' }}>
-                  Beauty Club
+                  Gerenciador de Anúncios
                 </div>
               </div>
             </Link>

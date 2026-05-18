@@ -126,6 +126,7 @@ router.patch('/:id', async (req, res) => {
     'name', 'niche', 'description', 'searchQuery', 'categoryIds',
     'minDiscount', 'onlyFreeShipping', 'onlyDeals', 'maxPerRun', 'intervalMin', 'autoSearch',
     'keywords', 'priceMin', 'priceMax', 'cooldownDays',
+    'autoApproveEnabled', 'autoApproveThreshold', 'autoApproveMaxDaily',
   ];
   const data = {};
   for (const k of allowed) if (k in (req.body ?? {})) data[k] = req.body[k];

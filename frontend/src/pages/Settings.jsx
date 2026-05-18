@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
 import Layout from '../components/Layout.jsx';
+import AffiliateSessionPanel from '../components/AffiliateSessionPanel.jsx';
 import { Icon } from '../components/Icon.jsx';
 
 export default function Settings() {
@@ -98,6 +99,8 @@ export default function Settings() {
             Gerencie a integração com o Mercado Livre
           </p>
         </div>
+
+        <AffiliateSessionPanel />
 
         {/* Status atual */}
         <div className="card">

@@ -128,7 +128,7 @@ export default function WhatsAppPanel({ ws, reload }) {
               <ol className="list-decimal pl-5 text-xs mt-1 space-y-1" style={{ color: 'rgb(var(--text-muted))' }}>
                 <li>Abra o WhatsApp no celular do bot</li>
                 <li>Configurações → Aparelhos conectados</li>
-                <li>Remova outras sessões "Chrome" ou "NajuGroups" ativas</li>
+                <li>Remova outras sessões "Chrome" ou "AdManager" ativas</li>
                 <li>Volte aqui e clique em <strong>Retomar</strong></li>
               </ol>
               <p className="text-xs mt-3 px-3 py-2 rounded-lg" style={{ background: 'rgba(245,158,11,0.1)', color: 'rgb(245,158,11)' }}>

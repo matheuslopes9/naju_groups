@@ -2,7 +2,7 @@
  * Tema light/dark com persistência em localStorage.
  * Aplica em <html data-theme="..."> pra ativar as variáveis CSS.
  */
-const KEY = 'naju.theme';
+const KEY = 'admanager.theme';
 
 export function getTheme() {
   if (typeof window === 'undefined') return 'dark';

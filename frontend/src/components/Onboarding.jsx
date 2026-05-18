@@ -51,7 +51,7 @@ export default function Onboarding({ hasWorkspaces, mlConnected, onStartCreate }
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2">
-              <span className="text-gradient">✨</span> Bem-vindo ao Naju Groups
+              <span className="text-gradient">✨</span> Bem-vindo ao AdManager
             </h2>
             <p className="text-sm mt-1" style={{ color: 'rgb(var(--text-muted))' }}>
               Siga os passos abaixo para começar a curar ofertas ·

@@ -10,6 +10,7 @@ import { scrapeSource, scoreOffer, matchKeywords } from './ml/scraper.js';
 import { attachAffiliateTag } from './ml/affiliate.js';
 import { getAffiliateTag } from './ml/oauth.js';
 import { detectCategory, commissionPctFor, estimateCommission } from './ml/commission.js';
+import { runAgentForWorkspace } from './agent.js';
 
 const lastRunMap = new Map();
 
@@ -152,6 +153,23 @@ export async function runWorkspace(ws, onProgress) {
     });
   }
 
-  onProgress?.({ stage: 'done', scanned, saved });
-  return { saved, scanned };
+  // Após salvar ofertas, dispara o agente IA (se autoApprove ligado)
+  let autoApproved = 0;
+  if (ws.autoApproveEnabled) {
+    try {
+      const result = await runAgentForWorkspace(ws);
+      autoApproved = result.sent ?? 0;
+      onProgress?.({
+        stage: 'agent-done',
+        sent: autoApproved,
+        processed: result.processed ?? 0,
+        skipReason: result.skipReason,
+      });
+    } catch (e) {
+      onProgress?.({ stage: 'agent-error', error: e.message });
+    }
+  }
+
+  onProgress?.({ stage: 'done', scanned, saved, autoApproved });
+  return { saved, scanned, autoApproved };
 }

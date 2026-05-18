@@ -50,7 +50,7 @@ export default function Tutorials() {
             <span className="text-gradient">📚</span> Tutoriais
           </h1>
           <p className="text-sm mt-1" style={{ color: 'rgb(var(--text-muted))' }}>
-            Aprenda a configurar e usar o Naju Groups passo a passo
+            Aprenda a configurar e usar o AdManager passo a passo
           </p>
         </div>
 
