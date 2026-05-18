@@ -74,31 +74,46 @@ export async function scrapeSource({ slug = '', maxPages = 1 } = {}, onProgress)
 
 async function scrapePage(url) {
   await delay(500, 1500);
+  console.log(`   🌐 GET ${url}`);
+  const ua = pickUA();
   const res = await fetch(url, {
     headers: {
-      'User-Agent': pickUA(),
+      'User-Agent': ua,
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
       'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
       'Cache-Control': 'no-cache',
     },
+    redirect: 'follow',
   });
+  console.log(`   ← HTTP ${res.status} ${res.statusText} (final URL: ${res.url})`);
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status}`);
+    throw new Error(`HTTP ${res.status} (UA: ${ua.slice(0, 50)})`);
   }
   const html = await res.text();
-  return parseOffersPage(html);
+  console.log(`   📄 HTML size: ${(html.length / 1024).toFixed(0)} KB`);
+
+  // Conta os cards encontrados antes do parser
+  const cardMatches = (html.match(/poly-card poly-card/g) ?? []).length;
+  console.log(`   🃏 poly-card matches no HTML: ${cardMatches}`);
+
+  const parsed = parseOffersPage(html);
+  console.log(`   ✂️  Parser extraiu: ${parsed.length} ofertas válidas`);
+  return parsed;
 }
 
 function parseOffersPage(html) {
   const $ = cheerio.load(html);
   const offers = [];
   const seen = new Set();
+  const reasons = { noTitle: 0, noPermalink: 0, noProductId: 0, dupe: 0, noPrice: 0 };
 
-  $('div.andes-card.poly-card').each((_, el) => {
+  const cards = $('div.andes-card.poly-card');
+  console.log(`   📦 cheerio encontrou ${cards.length} elementos andes-card.poly-card`);
+
+  cards.each((_, el) => {
     const $el = $(el);
 
-    // FIX: o seletor velho exigia <h3>, mas markup novo é só <a class="poly-component__title">.
-    // Tenta os dois.
+    // FIX: seletor velho exigia <h3>, markup novo é só <a class="poly-component__title">
     let titleAnchor = $el.find('a.poly-component__title').first();
     if (!titleAnchor.length) {
       titleAnchor = $el.find('h3.poly-component__title-wrapper a').first();
@@ -107,9 +122,11 @@ function parseOffersPage(html) {
     let permalink = titleAnchor.attr('href') ?? '';
     permalink = permalink.split('#')[0];
 
+    if (!title) { reasons.noTitle++; return; }
+    if (!permalink) { reasons.noPermalink++; return; }
     const productId = extractProductId(permalink);
-    if (!title || !permalink || !productId) return;
-    if (seen.has(productId)) return;
+    if (!productId) { reasons.noProductId++; return; }
+    if (seen.has(productId)) { reasons.dupe++; return; }
     seen.add(productId);
 
     const img = $el.find('img.poly-component__picture').first();
@@ -145,7 +162,7 @@ function parseOffersPage(html) {
     const coupon = $el.find('span.poly-coupons__pill, .poly-coupons span').first().text().trim()
                 || ($el.text().match(/Cupom[^,\n]{0,30}/i)?.[0]?.trim() ?? '');
 
-    if (price == null) return;
+    if (price == null) { reasons.noPrice++; return; }
 
     offers.push({
       productId,
@@ -163,6 +180,9 @@ function parseOffersPage(html) {
       coupon: coupon || null,
     });
   });
+
+  const discarded = Object.entries(reasons).filter(([_, v]) => v > 0).map(([k, v]) => `${k}=${v}`).join(' ');
+  if (discarded) console.log(`   🗑️  parser descartou:`, discarded);
 
   return offers;
 }

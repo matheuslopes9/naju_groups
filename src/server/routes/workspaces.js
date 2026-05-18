@@ -398,15 +398,32 @@ router.patch('/:id/offers/:offerId/shortlink', async (req, res) => {
 });
 
 router.post('/:id/offers/:offerId/approve', async (req, res) => {
-  const offer = await prisma.offer.findUnique({ where: { id: req.params.offerId } });
+  let offer = await prisma.offer.findUnique({ where: { id: req.params.offerId } });
   if (!offer || offer.workspaceId !== req.params.id) return res.status(404).json({ error: 'not found' });
 
-  // BLOQUEIO: exige shortlink oficial antes de enviar
+  // Se não tem shortlink, tenta gerar automaticamente (sessão conectada)
   if (!offer.shortlink) {
-    return res.status(400).json({
-      error: 'Esta oferta não tem shortlink oficial cadastrado. Gere o link no portal de afiliados e cole no card antes de aprovar.',
-      needsShortlink: true,
-    });
+    try {
+      const { getSessionStatus, generateShortlink } = await import('../ml/affiliate-browser.js');
+      const session = await getSessionStatus();
+      if (session.status === 'connected') {
+        const shortlink = await generateShortlink(offer.permalink);
+        offer = await prisma.offer.update({
+          where: { id: offer.id },
+          data: { shortlink, shortlinkAddedAt: new Date() },
+        });
+      } else {
+        return res.status(400).json({
+          error: 'Sessão de afiliado desconectada. Conecte em Configurações OU cole o shortlink manualmente antes de aprovar.',
+          needsShortlink: true,
+        });
+      }
+    } catch (e) {
+      return res.status(500).json({
+        error: `Falha ao gerar shortlink: ${e.message}. Tente colar manualmente.`,
+        needsShortlink: true,
+      });
+    }
   }
 
   // Envia pro(s) grupo(s) de STAGING desse workspace

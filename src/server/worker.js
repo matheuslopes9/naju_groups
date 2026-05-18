@@ -11,6 +11,7 @@ import { attachAffiliateTag } from './ml/affiliate.js';
 import { getAffiliateTag } from './ml/oauth.js';
 import { detectCategory, commissionPctFor, estimateCommission } from './ml/commission.js';
 import { runAgentForWorkspace } from './agent.js';
+import { generateShortlink, getSessionStatus } from './ml/affiliate-browser.js';
 
 const lastRunMap = new Map();
 
@@ -40,6 +41,12 @@ export async function runWorkspace(ws, onProgress) {
     onProgress?.({ stage: 'error', message: 'Nenhuma fonte cadastrada. Adicione em Configuração.' });
     return { saved: 0, scanned: 0 };
   }
+
+  console.log(`\n🔍 [${ws.name}] iniciando busca em ${sources.length} fonte(s):`);
+  for (const s of sources) {
+    console.log(`   • ${s.label} (slug="${s.slug}", maxPages=${s.maxPages}, enabled=${s.enabled})`);
+  }
+  console.log(`   filtros: minDiscount=${ws.minDiscount}, freteGratis=${ws.onlyFreeShipping}, onlyDeals=${ws.onlyDeals}, preço=${ws.priceMin}-${ws.priceMax}, cooldown=${ws.cooldownDays}d, keywords="${ws.keywords ?? ''}"`);
 
   onProgress?.({ stage: 'start', totalSources: sources.length });
 
@@ -158,6 +165,11 @@ export async function runWorkspace(ws, onProgress) {
     });
   }
 
+  // Gera shortlinks oficiais para ofertas pending que ainda não têm,
+  // SE a sessão de afiliado estiver conectada. Roda independente do
+  // agente IA — assim quando você for aprovar manualmente, já tem o link.
+  await autoGenerateShortlinks(ws, onProgress);
+
   // Após salvar ofertas, dispara o agente IA (se autoApprove ligado)
   let autoApproved = 0;
   if (ws.autoApproveEnabled) {
@@ -177,4 +189,67 @@ export async function runWorkspace(ws, onProgress) {
 
   onProgress?.({ stage: 'done', scanned, saved, autoApproved });
   return { saved, scanned, autoApproved };
+}
+
+/**
+ * Gera shortlinks oficiais (mercadolivre.com.br/sec/…) para todas as
+ * ofertas pending do workspace que ainda não têm. Pré-condição: sessão
+ * de afiliado conectada. Falhas individuais não param o lote.
+ *
+ * Limite: pra evitar travar minutos no portal de afiliados, processa no
+ * máximo 20 ofertas por execução do worker. Próximas execuções pegam o resto.
+ */
+async function autoGenerateShortlinks(ws, onProgress) {
+  const session = await getSessionStatus();
+  if (session.status !== 'connected') {
+    console.log(`   ⚠️  Sessão afiliado: ${session.status} — pulando geração automática de shortlinks`);
+    return;
+  }
+
+  const pending = await prisma.offer.findMany({
+    where: {
+      workspaceId: ws.id,
+      status: 'pending',
+      shortlink: null,
+    },
+    orderBy: [{ score: 'desc' }, { createdAt: 'asc' }],
+    take: 20,
+  });
+
+  if (pending.length === 0) return;
+
+  console.log(`   🔗 Gerando shortlinks para ${pending.length} oferta(s)…`);
+  onProgress?.({ stage: 'shortlinks-start', total: pending.length });
+
+  let generated = 0;
+  let failed = 0;
+  for (const [idx, offer] of pending.entries()) {
+    try {
+      const shortlink = await generateShortlink(offer.permalink);
+      await prisma.offer.update({
+        where: { id: offer.id },
+        data: { shortlink, shortlinkAddedAt: new Date() },
+      });
+      generated++;
+      onProgress?.({
+        stage: 'shortlink-done',
+        current: idx + 1,
+        total: pending.length,
+        title: offer.title.slice(0, 60),
+      });
+    } catch (e) {
+      failed++;
+      console.warn(`   ❌ shortlink falhou: ${e.message}`);
+      onProgress?.({
+        stage: 'shortlink-error',
+        current: idx + 1,
+        total: pending.length,
+        error: e.message,
+      });
+      // se sessão expirou, para o lote
+      if (e.message.includes('Sessão expirou')) break;
+    }
+  }
+  console.log(`   ✅ Shortlinks: ${generated} gerados, ${failed} falharam`);
+  onProgress?.({ stage: 'shortlinks-done', generated, failed });
 }

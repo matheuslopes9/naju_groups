@@ -13,10 +13,15 @@ export default function OffersPanel({ ws }) {
   const [tab, setTab] = useState('pending');
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [progress, setProgress] = useState(null); // { stage, source, page, totalPages, scanned, saved, ... }
+  const [progress, setProgress] = useState(null);
   const [manualUrl, setManualUrl] = useState('');
   const [addingUrl, setAddingUrl] = useState(false);
+  const [affSession, setAffSession] = useState(null); // status da sessão de afiliado
   const evtRef = useRef(null);
+
+  useEffect(() => {
+    api.affiliateSessionGet().then(setAffSession).catch(() => setAffSession({ status: 'unknown' }));
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -199,6 +204,7 @@ export default function OffersPanel({ ws }) {
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger">
           {offers.map((o) => (
             <OfferCard key={o.id} offer={o} tab={tab}
+              affSessionConnected={affSession?.status === 'connected'}
               onApprove={() => approve(o.id)}
               onReject={() => reject(o.id)}
               onSetShortlink={(sl) => setShortlink(o.id, sl)} />
@@ -277,11 +283,13 @@ const CATEGORY_LABELS = {
   music: '🎸 Música', games: '🎮 Games', other: '📦 Outros',
 };
 
-function OfferCard({ offer, tab, onApprove, onReject, onSetShortlink }) {
+function OfferCard({ offer, tab, affSessionConnected, onApprove, onReject, onSetShortlink }) {
   const catLabel = CATEGORY_LABELS[offer.categoryDetected] ?? CATEGORY_LABELS.other;
   const commission = offer.estimatedCommission;
   const scoreColor = (offer.score ?? 0) >= 70 ? 'badge-success' : (offer.score ?? 0) >= 50 ? 'badge-warning' : 'badge-muted';
   const hasShortlink = !!offer.shortlink;
+  // Pode aprovar se já tem shortlink OU se sessão de afiliado tá conectada (gera on demand)
+  const canApprove = hasShortlink || affSessionConnected;
   const [shortlinkDraft, setShortlinkDraft] = useState('');
   const [editing, setEditing] = useState(false);
 
@@ -367,6 +375,13 @@ function OfferCard({ offer, tab, onApprove, onReject, onSetShortlink }) {
                 <button onClick={() => { setEditing(true); setShortlinkDraft(offer.shortlink); }}
                         className="text-[10px] opacity-70 hover:opacity-100 shrink-0">editar</button>
               </div>
+            ) : affSessionConnected ? (
+              // Sessão de afiliado conectada — link será gerado on demand ao aprovar
+              <div className="text-[11px] px-2 py-1.5 rounded flex items-center gap-1.5"
+                   style={{ background: 'rgba(99,102,241,0.1)', color: 'rgb(129,140,248)' }}>
+                <Icon.Sparkles width={12} height={12} />
+                <span>Shortlink será gerado automaticamente ao aprovar</span>
+              </div>
             ) : editing ? (
               <div className="space-y-1.5">
                 <input
@@ -388,6 +403,10 @@ function OfferCard({ offer, tab, onApprove, onReject, onSetShortlink }) {
               </div>
             ) : (
               <div className="space-y-1.5">
+                <div className="text-[10px] px-2 py-1 rounded"
+                     style={{ background: 'rgba(245,158,11,0.1)', color: 'rgb(245,158,11)' }}>
+                  ⚠️ Sessão de afiliado desconectada — gere manual
+                </div>
                 <button onClick={copyPermalink}
                         className="btn btn-secondary !text-[10px] !py-1.5 w-full"
                         title="Copia URL + abre o gerador do ML em nova aba">
@@ -414,8 +433,10 @@ function OfferCard({ offer, tab, onApprove, onReject, onSetShortlink }) {
           {tab === 'pending' && (
             <div className="flex gap-2">
               <button onClick={onApprove}
-                      disabled={!hasShortlink}
-                      title={hasShortlink ? '' : 'Cole o shortlink oficial primeiro'}
+                      disabled={!canApprove}
+                      title={canApprove
+                        ? (hasShortlink ? 'Aprovar e enviar com shortlink salvo' : 'Aprovar — shortlink será gerado automaticamente')
+                        : 'Conecte a sessão de afiliado OU cole shortlink primeiro'}
                       className="btn btn-primary flex-1 !py-1.5 !text-xs">
                 <Icon.Check width={14} height={14} /> Aprovar e enviar
               </button>
