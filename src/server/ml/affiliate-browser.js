@@ -13,11 +13,24 @@
  *    Use por sua conta e risco.
  */
 import { chromium } from 'playwright-core';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { prisma } from '../db.js';
 import { encrypt, decrypt } from '../crypto.js';
 
 const GENERATOR_URL = 'https://www.mercadolivre.com.br/afiliados/linkbuilder';
 const STORAGE_DIR = './auth_state/affiliate';
+const DEBUG_DIR = './auth_state/affiliate/debug';
+
+// Mutex: só 1 generateShortlink rodando por vez. Evita corridas de Playwright
+// (várias instâncias do Chromium tentando logar ao mesmo tempo) que causam
+// timeouts mascarados.
+let mutexChain = Promise.resolve();
+function withMutex(fn) {
+  const next = mutexChain.then(fn, fn);
+  mutexChain = next.catch(() => {});
+  return next;
+}
 
 // Localiza o Chromium do sistema (no Docker vamos instalar via apt; em dev
 // usamos os browsers do Playwright se existirem; senão tenta path padrão).
@@ -156,6 +169,10 @@ export async function importCookies(cookiesJson) {
  * Retorna a URL encurtada (mercadolivre.com.br/sec/XXXX).
  */
 export async function generateShortlink(productUrl) {
+  return withMutex(() => _generateShortlinkUnsafe(productUrl));
+}
+
+async function _generateShortlinkUnsafe(productUrl) {
   let ctx;
   const startedAt = Date.now();
   try {
@@ -271,10 +288,19 @@ export async function generateShortlink(productUrl) {
     ]);
 
     if (!link) {
-      // último recurso: salva o HTML pra diagnóstico
-      const debugHtml = await page.content();
-      console.warn(`   📋 HTML do gerador (primeiros 500 chars): ${debugHtml.slice(0, 500)}`);
-      throw new Error('Não consegui extrair o shortlink em 25s — HTML do portal pode ter mudado');
+      // Salva HTML + screenshot do erro pra diagnóstico
+      try {
+        await fs.mkdir(DEBUG_DIR, { recursive: true });
+        const timestamp = Date.now();
+        const htmlPath = path.join(DEBUG_DIR, `fail-${timestamp}.html`);
+        const pngPath = path.join(DEBUG_DIR, `fail-${timestamp}.png`);
+        await fs.writeFile(htmlPath, await page.content());
+        await page.screenshot({ path: pngPath, fullPage: true });
+        console.warn(`   📋 Debug salvo: ${htmlPath} + ${pngPath}`);
+      } catch (e) {
+        console.warn(`   ⚠️  Falha ao salvar debug: ${e.message}`);
+      }
+      throw new Error('Não consegui extrair o shortlink em 25s — HTML do portal pode ter mudado (ver debug em /app/auth_state/affiliate/debug/)');
     }
     console.log(`   ✅ shortlink gerado em ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${link}`);
     return link;

@@ -3,12 +3,43 @@
  * (login via cookies importados, status, gerar shortlink, desconectar).
  */
 import { Router } from 'express';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import {
   getSessionStatus, importCookies, checkSession, disconnect, generateShortlink,
 } from '../ml/affiliate-browser.js';
 import { audit } from '../audit.js';
 
 const router = Router();
+
+// Lista arquivos de debug salvos quando o Playwright falha em gerar shortlink
+router.get('/debug', async (_req, res) => {
+  const dir = './auth_state/affiliate/debug';
+  try {
+    const files = await fs.readdir(dir);
+    const items = await Promise.all(files.map(async (f) => {
+      const stat = await fs.stat(path.join(dir, f));
+      return { name: f, size: stat.size, modified: stat.mtime };
+    }));
+    items.sort((a, b) => b.modified - a.modified);
+    res.json(items.slice(0, 20));
+  } catch (e) {
+    res.json([]);
+  }
+});
+
+router.get('/debug/:filename', async (req, res) => {
+  const f = req.params.filename.replace(/[^a-zA-Z0-9._-]/g, '');
+  const filePath = path.join('./auth_state/affiliate/debug', f);
+  try {
+    const data = await fs.readFile(filePath);
+    if (f.endsWith('.png')) res.type('image/png').send(data);
+    else if (f.endsWith('.html')) res.type('text/html').send(data);
+    else res.send(data);
+  } catch {
+    res.status(404).send('not found');
+  }
+});
 
 router.get('/session', async (_req, res) => {
   try { res.json(await getSessionStatus()); }

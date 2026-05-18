@@ -14,6 +14,7 @@ import { runAgentForWorkspace } from './agent.js';
 import { generateShortlink, getSessionStatus } from './ml/affiliate-browser.js';
 
 const lastRunMap = new Map();
+const inFlightMap = new Map(); // workspaceId → Promise em execução, evita corrida
 
 export function startWorker() {
   setInterval(runOnce, 60_000);
@@ -33,6 +34,20 @@ async function runOnce() {
 }
 
 export async function runWorkspace(ws, onProgress) {
+  // Se já tem uma busca rodando pra esse workspace, retorna a mesma Promise.
+  // Evita disparar várias instâncias do scraper + Playwright em paralelo.
+  if (inFlightMap.has(ws.id)) {
+    console.log(`   ⏳ Busca já em andamento pra "${ws.name}" — reaproveitando`);
+    return inFlightMap.get(ws.id);
+  }
+  const promise = _runWorkspaceUnsafe(ws, onProgress).finally(() => {
+    inFlightMap.delete(ws.id);
+  });
+  inFlightMap.set(ws.id, promise);
+  return promise;
+}
+
+async function _runWorkspaceUnsafe(ws, onProgress) {
   const sources = await prisma.workspaceSource.findMany({
     where: { workspaceId: ws.id, enabled: true },
   });
