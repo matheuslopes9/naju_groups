@@ -234,6 +234,25 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
     };
     page.on('response', collectShortlink);
 
+    // Captura console errors + requisições falhadas — pode revelar problemas silenciosos
+    const browserLogs = [];
+    page.on('console', (msg) => {
+      const type = msg.type();
+      if (type === 'error' || type === 'warning') {
+        const text = msg.text();
+        browserLogs.push(`[${type}] ${text.slice(0, 200)}`);
+      }
+    });
+    page.on('pageerror', (err) => {
+      browserLogs.push(`[pageerror] ${err.message?.slice(0, 200)}`);
+    });
+    page.on('requestfailed', (req) => {
+      const url = req.url();
+      if (url.includes('mercadolivre') || url.includes('mercadolibre')) {
+        browserLogs.push(`[requestfailed] ${req.method()} ${url.slice(0, 120)} — ${req.failure()?.errorText}`);
+      }
+    });
+
     await step(null, 'goto', `Navegando para ${GENERATOR_URL}`);
     await page.goto(GENERATOR_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await step(page, 'page-loaded', `URL final: ${page.url()}`);
@@ -296,34 +315,50 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
       'button:has-text("Gerar"):not([disabled])',
       '[role="button"]:has-text("Gerar")',
     ];
-    let clicked = false;
+    // Aguarda mais tempo pro botão ficar habilitado depois do Tab
+    // (React precisa processar o input e atualizar o disabled)
+    await page.waitForTimeout(1500);
+
+    let clickedSel = null;
     for (const sel of btnSelectors) {
       try {
         const btn = page.locator(sel).first();
         const count = await btn.count();
         if (count === 0) continue;
-        // Confere se está habilitado
         const disabled = await btn.isDisabled().catch(() => false);
         if (disabled) {
           console.log(`   ⚠️  botão ${sel} está desabilitado — tentando próximo`);
           continue;
         }
-        await btn.click({ timeout: 5000 });
-        clicked = true;
+        // Estratégia tripla: scrollIntoView + hover + click forçado
+        await btn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+        await btn.hover({ timeout: 3000 }).catch(() => {});
+        await page.waitForTimeout(200);
+        await btn.click({ timeout: 5000, force: false });
+        clickedSel = sel;
         console.log(`   ✓ botão clicado: ${sel}`);
         break;
-      } catch {}
+      } catch (e) {
+        console.warn(`   ⚠️  click em ${sel} falhou: ${e.message?.slice(0, 100)}`);
+      }
     }
-    if (!clicked) throw new Error('Não achei botão "Gerar" habilitado (pode estar disabled por conteúdo inválido)');
-    await step(page, 'clicked', 'Botão Gerar clicado, aguardando link…');
+    if (!clickedSel) throw new Error('Não achei botão "Gerar" habilitado (pode estar disabled por conteúdo inválido)');
+    await step(page, 'clicked', `Botão Gerar clicado: ${clickedSel}, aguardando link…`);
+
+    // Screenshot IMEDIATAMENTE após o click pra ver o estado pós-click
+    await page.waitForTimeout(1000);
+    await step(page, 'post-click-1s', '1 segundo após click');
+
+    await page.waitForTimeout(3000);
+    await step(page, 'post-click-4s', '4 segundos após click');
 
     // Aguarda link aparecer. Polling manual em paralelo:
     //   - Verifica network intercept (shortlinks Set)
     //   - Procura no DOM (anchor href, input value, regex no texto)
     // Em vez de waitForFunction que lança throw em timeout, fazemos
     // loop manual que retorna null e cai no fluxo de debug.
-    const POLL_INTERVAL = 500;
-    const TIMEOUT_MS = 25000;
+    const POLL_INTERVAL = 1000;
+    const TIMEOUT_MS = 60000; // 60s — portal pode demorar pra responder
     let link = null;
     const pollStart = Date.now();
     while (Date.now() - pollStart < TIMEOUT_MS) {
@@ -351,13 +386,14 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
     }
 
     if (!link) {
-      await step(page, 'timeout', 'Timeout esperando shortlink aparecer no DOM/rede');
+      const recentLogs = browserLogs.slice(-10).join(' | ');
+      await step(page, 'timeout', `Timeout. Browser logs recentes: ${recentLogs || '(nenhum)'}`);
       // SEMPRE salva debug final
-      const debugInfo = await captureDebug(page, productUrl, sessionTag).catch(() => null);
+      const debugInfo = await captureDebug(page, productUrl, sessionTag, browserLogs).catch(() => null);
       const hint = debugInfo
         ? ` (debug: ${path.basename(debugInfo.htmlPath)})`
         : '';
-      throw new Error(`Timeout 25s esperando shortlink${hint}`);
+      throw new Error(`Timeout 60s esperando shortlink${hint}`);
     }
     await step(page, 'success', `Shortlink: ${link}`);
     console.log(`   ✅ shortlink gerado em ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${link}`);
@@ -374,7 +410,7 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
  * Salva HTML + screenshot da página atual em /app/auth_state/affiliate/debug/.
  * Retorna paths salvos pra incluir no erro.
  */
-async function captureDebug(page, productUrl, sessionTag) {
+async function captureDebug(page, productUrl, sessionTag, browserLogs = []) {
   await fs.mkdir(DEBUG_DIR, { recursive: true });
   const prefix = sessionTag ? `fail-${sessionTag}` : `fail-${Date.now()}`;
   const htmlPath = path.join(DEBUG_DIR, `${prefix}.html`);
@@ -394,6 +430,7 @@ async function captureDebug(page, productUrl, sessionTag) {
     productUrl,
     pageUrl: page.url(),
     title: await page.title().catch(() => null),
+    browserLogs: browserLogs.slice(-30), // últimos 30 eventos do console do browser
   }, null, 2));
 
   console.warn(`   📋 Debug final salvo: ${path.basename(htmlPath)}`);
