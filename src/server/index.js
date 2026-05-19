@@ -23,7 +23,7 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
-const BUILD_TAG = 'v0.8-click-robusto-2026-05-19';
+const BUILD_TAG = 'v0.9-meli-la-2026-05-19';
 
 // API pública
 app.get('/healthz', (_req, res) => res.json({ ok: true, build: BUILD_TAG }));

@@ -22,6 +22,16 @@ const GENERATOR_URL = 'https://www.mercadolivre.com.br/afiliados/linkbuilder';
 const STORAGE_DIR = './auth_state/affiliate';
 const DEBUG_DIR = './auth_state/affiliate/debug';
 
+// Regex que casa TODOS os formatos de shortlink do ML afiliado:
+//   https://meli.la/1CmYUxY           (formato novo curto)
+//   https://www.mercadolivre.com.br/sec/2H4qXyZ
+//   http://mercadolivre.com/sec/abc
+const SHORTLINK_REGEX = /https?:\/\/(?:[\w-]+\.)?(?:meli\.la|mercadoli(?:vre|bre)\.com(?:\.[a-z]{2,3})?\/sec)\/[A-Za-z0-9]+/i;
+
+function isShortlinkUrl(url) {
+  return SHORTLINK_REGEX.test(url ?? '');
+}
+
 // Mutex: só 1 generateShortlink rodando por vez. Evita corridas de Playwright
 // (várias instâncias do Chromium tentando logar ao mesmo tempo) que causam
 // timeouts mascarados.
@@ -217,8 +227,8 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
     const shortlinks = new Set();
     const collectShortlink = async (response) => {
       const url = response.url();
-      // 1. URL da própria response é um shortlink
-      if (url.includes('/sec/')) {
+      // 1. URL da própria response é um shortlink (vários formatos)
+      if (isShortlinkUrl(url)) {
         shortlinks.add(url);
         return;
       }
@@ -227,7 +237,7 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
       if (ct.includes('json')) {
         try {
           const body = await response.text();
-          const m = body.match(/https?:\/\/[^"\s]*\/sec\/[A-Za-z0-9]+/);
+          const m = body.match(SHORTLINK_REGEX);
           if (m) shortlinks.add(m[0]);
         } catch {}
       }
@@ -367,15 +377,29 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
         link = Array.from(shortlinks)[0];
         break;
       }
-      // 2. DOM scan
+      // 2. DOM scan — procura nos vários formatos do ML
+      // O portal mostra o link gerado em um textarea/input após gerar,
+      // ou em um <a>, ou no texto puro. Cobre todos os 3 + tanto
+      // /sec/ (legado) quanto meli.la/ (novo formato curto)
       try {
         link = await page.evaluate(() => {
-          const anchor = document.querySelector('a[href*="/sec/"]');
-          if (anchor) return anchor.href;
-          const input = document.querySelector('input[value*="/sec/"]');
-          if (input) return input.value;
+          // Regex inline (mesmo padrão do server) — JS regex literal
+          const re = /https?:\/\/(?:[\w-]+\.)?(?:meli\.la|mercadoli(?:vre|bre)\.com(?:\.[a-z]{2,3})?\/sec)\/[A-Za-z0-9]+/i;
+
+          // Procura em <a href>
+          for (const a of document.querySelectorAll('a[href]')) {
+            const m = a.href.match(re);
+            if (m) return m[0];
+          }
+          // Procura em <input value> e <textarea value>
+          for (const el of document.querySelectorAll('input, textarea')) {
+            const v = el.value ?? '';
+            const m = v.match(re);
+            if (m) return m[0];
+          }
+          // Fallback: regex no texto visível da página inteira
           const txt = document.body?.innerText ?? '';
-          const m = txt.match(/https?:\/\/[^\s"]*\/sec\/[A-Za-z0-9]+/);
+          const m = txt.match(re);
           if (m) return m[0];
           return null;
         });
