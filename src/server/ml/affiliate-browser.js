@@ -257,50 +257,49 @@ async function _generateShortlinkUnsafe(productUrl) {
     }
     if (!clicked) throw new Error('Não achei botão Gerar');
 
-    // Aguarda link aparecer. Tenta 3 caminhos em paralelo:
-    //   1. Network intercept (preferido)
-    //   2. Anchor href com /sec/
-    //   3. Input com value contendo /sec/
-    //   4. Texto da página que match URL ML/sec/
-    const linkFromPage = page.waitForFunction(() => {
-      const anchor = document.querySelector('a[href*="/sec/"]');
-      if (anchor) return anchor.href;
-      const input = document.querySelector('input[value*="/sec/"]');
-      if (input) return input.value;
-      const txt = document.body.innerText;
-      const m = txt.match(/https?:\/\/[^\s"]*\/sec\/[A-Za-z0-9]+/);
-      if (m) return m[0];
-      return null;
-    }, null, { timeout: 25000 });
-
-    // Race: o que vier primeiro entre o intercept de rede e a DOM
-    const networkWait = (async () => {
-      for (let i = 0; i < 50; i++) {
-        if (shortlinks.size > 0) return Array.from(shortlinks)[0];
-        await page.waitForTimeout(500);
+    // Aguarda link aparecer. Polling manual em paralelo:
+    //   - Verifica network intercept (shortlinks Set)
+    //   - Procura no DOM (anchor href, input value, regex no texto)
+    // Em vez de waitForFunction que lança throw em timeout, fazemos
+    // loop manual que retorna null e cai no fluxo de debug.
+    const POLL_INTERVAL = 500;
+    const TIMEOUT_MS = 25000;
+    let link = null;
+    const pollStart = Date.now();
+    while (Date.now() - pollStart < TIMEOUT_MS) {
+      // 1. Network intercept (preferido — pode ter chegado antes mesmo de renderizar)
+      if (shortlinks.size > 0) {
+        link = Array.from(shortlinks)[0];
+        break;
       }
-      return null;
-    })();
+      // 2. DOM scan
+      try {
+        link = await page.evaluate(() => {
+          const anchor = document.querySelector('a[href*="/sec/"]');
+          if (anchor) return anchor.href;
+          const input = document.querySelector('input[value*="/sec/"]');
+          if (input) return input.value;
+          const txt = document.body?.innerText ?? '';
+          const m = txt.match(/https?:\/\/[^\s"]*\/sec\/[A-Za-z0-9]+/);
+          if (m) return m[0];
+          return null;
+        });
+        if (link) break;
+      } catch { /* page pode estar navegando */ }
 
-    const link = await Promise.race([
-      linkFromPage.then((handle) => handle?.jsonValue?.() ?? null),
-      networkWait,
-    ]);
+      await page.waitForTimeout(POLL_INTERVAL);
+    }
 
     if (!link) {
-      // Salva HTML + screenshot do erro pra diagnóstico
-      try {
-        await fs.mkdir(DEBUG_DIR, { recursive: true });
-        const timestamp = Date.now();
-        const htmlPath = path.join(DEBUG_DIR, `fail-${timestamp}.html`);
-        const pngPath = path.join(DEBUG_DIR, `fail-${timestamp}.png`);
-        await fs.writeFile(htmlPath, await page.content());
-        await page.screenshot({ path: pngPath, fullPage: true });
-        console.warn(`   📋 Debug salvo: ${htmlPath} + ${pngPath}`);
-      } catch (e) {
-        console.warn(`   ⚠️  Falha ao salvar debug: ${e.message}`);
-      }
-      throw new Error('Não consegui extrair o shortlink em 25s — HTML do portal pode ter mudado (ver debug em /app/auth_state/affiliate/debug/)');
+      // SEMPRE salva debug antes de lançar erro
+      const debugInfo = await captureDebug(page, productUrl).catch((e) => {
+        console.warn(`   ⚠️  Falha ao capturar debug: ${e.message}`);
+        return null;
+      });
+      const hint = debugInfo
+        ? ` (debug: ${debugInfo.htmlPath}, ${debugInfo.pngPath})`
+        : '';
+      throw new Error(`Não consegui extrair o shortlink em 25s — HTML do portal pode ter mudado${hint}`);
     }
     console.log(`   ✅ shortlink gerado em ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${link}`);
     return link;
@@ -310,6 +309,35 @@ async function _generateShortlinkUnsafe(productUrl) {
   } finally {
     if (ctx) await ctx.close();
   }
+}
+
+/**
+ * Salva HTML + screenshot da página atual em /app/auth_state/affiliate/debug/.
+ * Retorna paths salvos pra incluir no erro.
+ */
+async function captureDebug(page, productUrl) {
+  await fs.mkdir(DEBUG_DIR, { recursive: true });
+  const timestamp = Date.now();
+  const htmlPath = path.join(DEBUG_DIR, `fail-${timestamp}.html`);
+  const pngPath = path.join(DEBUG_DIR, `fail-${timestamp}.png`);
+  const metaPath = path.join(DEBUG_DIR, `fail-${timestamp}.json`);
+
+  const html = await page.content().catch(() => '<no-content>');
+  await fs.writeFile(htmlPath, html);
+
+  await page.screenshot({ path: pngPath, fullPage: true }).catch((e) => {
+    console.warn(`   ⚠️  screenshot falhou: ${e.message}`);
+  });
+
+  await fs.writeFile(metaPath, JSON.stringify({
+    timestamp,
+    productUrl,
+    pageUrl: page.url(),
+    title: await page.title().catch(() => null),
+  }, null, 2));
+
+  console.warn(`   📋 Debug salvo: ${path.basename(htmlPath)}`);
+  return { htmlPath, pngPath, metaPath };
 }
 
 export async function getSessionStatus() {

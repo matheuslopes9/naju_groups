@@ -207,12 +207,13 @@ async function _runWorkspaceUnsafe(ws, onProgress) {
 }
 
 /**
- * Gera shortlinks oficiais (mercadolivre.com.br/sec/…) para todas as
- * ofertas pending do workspace que ainda não têm. Pré-condição: sessão
- * de afiliado conectada. Falhas individuais não param o lote.
+ * Gera shortlinks oficiais (mercadolivre.com.br/sec/…) para ofertas pending
+ * do workspace. Pré-condição: sessão de afiliado conectada.
  *
- * Limite: pra evitar travar minutos no portal de afiliados, processa no
- * máximo 20 ofertas por execução do worker. Próximas execuções pegam o resto.
+ * IMPORTANTE: limite reduzido pra 3 ofertas/ciclo pra evitar:
+ *  - travar 30s × N produtos quando o portal não responde
+ *  - sobrecarga do EasyPanel com Playwright pesado
+ *  - se 3 seguidas falharem, ABORTA o lote (sinal de problema sistêmico)
  */
 async function autoGenerateShortlinks(ws, onProgress) {
   const session = await getSessionStatus();
@@ -228,7 +229,7 @@ async function autoGenerateShortlinks(ws, onProgress) {
       shortlink: null,
     },
     orderBy: [{ score: 'desc' }, { createdAt: 'asc' }],
-    take: 20,
+    take: 3, // limite reduzido — Playwright é caro e estamos em modo debug
   });
 
   if (pending.length === 0) return;
@@ -238,6 +239,7 @@ async function autoGenerateShortlinks(ws, onProgress) {
 
   let generated = 0;
   let failed = 0;
+  let consecutiveFails = 0;
   for (const [idx, offer] of pending.entries()) {
     try {
       const shortlink = await generateShortlink(offer.permalink);
@@ -246,6 +248,7 @@ async function autoGenerateShortlinks(ws, onProgress) {
         data: { shortlink, shortlinkAddedAt: new Date() },
       });
       generated++;
+      consecutiveFails = 0;
       onProgress?.({
         stage: 'shortlink-done',
         current: idx + 1,
@@ -254,6 +257,7 @@ async function autoGenerateShortlinks(ws, onProgress) {
       });
     } catch (e) {
       failed++;
+      consecutiveFails++;
       console.warn(`   ❌ shortlink falhou: ${e.message}`);
       onProgress?.({
         stage: 'shortlink-error',
@@ -261,8 +265,16 @@ async function autoGenerateShortlinks(ws, onProgress) {
         total: pending.length,
         error: e.message,
       });
-      // se sessão expirou, para o lote
-      if (e.message.includes('Sessão expirou')) break;
+      // Sessão expirou? Aborta o lote inteiro
+      if (e.message.includes('Sessão expirou')) {
+        console.warn(`   ⚠️  Sessão expirou — abortando lote`);
+        break;
+      }
+      // 3 falhas consecutivas = problema sistêmico (HTML mudou, captcha, etc)
+      if (consecutiveFails >= 3) {
+        console.warn(`   ⚠️  3 falhas consecutivas — abortando lote pra evitar loop`);
+        break;
+      }
     }
   }
   console.log(`   ✅ Shortlinks: ${generated} gerados, ${failed} falharam`);
