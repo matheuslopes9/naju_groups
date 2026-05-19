@@ -77,4 +77,39 @@ router.post('/shortlink', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/**
+ * Streaming SSE — roda generateShortlink emitindo cada passo com screenshot.
+ * Permite debugar visualmente o que o Playwright está fazendo.
+ */
+router.get('/shortlink/test-stream', async (req, res) => {
+  const productUrl = req.query.url;
+  if (!productUrl) {
+    res.status(400).json({ error: 'query param ?url= obrigatório' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  const send = (data) => {
+    try { res.write(`data: ${JSON.stringify(data)}\n\n`); }
+    catch {}
+  };
+
+  send({ stage: 'connected', message: 'Iniciando…' });
+
+  try {
+    const shortlink = await generateShortlink(String(productUrl), {
+      onProgress: (evt) => send(evt),
+    });
+    send({ stage: 'done', message: 'Sucesso!', shortlink });
+  } catch (e) {
+    send({ stage: 'error', message: e.message });
+  }
+  res.end();
+});
+
 export default router;

@@ -168,15 +168,46 @@ export async function importCookies(cookiesJson) {
  * Gera shortlink oficial colando productUrl no gerador do portal.
  * Retorna a URL encurtada (mercadolivre.com.br/sec/XXXX).
  */
-export async function generateShortlink(productUrl) {
-  return withMutex(() => _generateShortlinkUnsafe(productUrl));
+/**
+ * @param {string} productUrl
+ * @param {object} [opts]
+ * @param {(evt: {stage: string, message: string, screenshot?: string, htmlSnippet?: string}) => void} [opts.onProgress]
+ *   Callback chamado a cada etapa — `screenshot` é nome do arquivo salvo em /api/affiliate/debug/.
+ */
+export async function generateShortlink(productUrl, opts = {}) {
+  return withMutex(() => _generateShortlinkUnsafe(productUrl, opts));
 }
 
-async function _generateShortlinkUnsafe(productUrl) {
+async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
   let ctx;
   const startedAt = Date.now();
+  // Sessão única de debug pra essa tentativa (todos os screenshots ficam juntos)
+  const sessionTag = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  let stepCount = 0;
+
+  // Helper pra emitir progresso + salvar screenshot
+  const step = async (page, stage, message) => {
+    stepCount++;
+    const log = `[step ${stepCount}] ${stage}: ${message}`;
+    console.log(`   ${log}`);
+    let screenshotName = null;
+    if (page) {
+      try {
+        await fs.mkdir(DEBUG_DIR, { recursive: true });
+        screenshotName = `step-${sessionTag}-${stepCount}-${stage}.png`;
+        await page.screenshot({
+          path: path.join(DEBUG_DIR, screenshotName),
+          fullPage: false, // viewport só, mais rápido
+        });
+      } catch (e) {
+        console.warn(`   ⚠️  screenshot do step falhou: ${e.message}`);
+      }
+    }
+    onProgress?.({ stage, message, screenshot: screenshotName, step: stepCount });
+  };
+
   try {
-    console.log(`   🔗 generateShortlink iniciando para ${productUrl.slice(0, 80)}…`);
+    await step(null, 'start', `URL: ${productUrl}`);
     ctx = await newContext();
     const page = await ctx.newPage();
 
@@ -203,7 +234,9 @@ async function _generateShortlinkUnsafe(productUrl) {
     };
     page.on('response', collectShortlink);
 
+    await step(null, 'goto', `Navegando para ${GENERATOR_URL}`);
     await page.goto(GENERATOR_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await step(page, 'page-loaded', `URL final: ${page.url()}`);
 
     if (page.url().includes('/login') || page.url().includes('/identification')) {
       await setStatus('disconnected', 'redirecionado pra login');
@@ -238,18 +271,20 @@ async function _generateShortlinkUnsafe(productUrl) {
       } catch {}
     }
     if (!filled) throw new Error('Não achei campo de URL no gerador (HTML pode ter mudado)');
+    await step(page, 'filled', `Textarea preenchido`);
 
     // Confirma que o textarea tem o conteúdo certo (validação anti-bug)
     try {
       const actualValue = await filledLocator.inputValue();
       if (!actualValue.includes('mercadoli')) {
-        console.warn(`   ⚠️  textarea com conteúdo inesperado: "${actualValue.slice(0, 60)}…"`);
+        await step(page, 'textarea-suspect', `Conteúdo inesperado: "${actualValue.slice(0, 60)}"`);
       }
     } catch {}
 
     // Tira foco do textarea (clica fora) — fecha sugestões da busca + libera botão Gerar
     await page.keyboard.press('Tab').catch(() => {});
     await page.waitForTimeout(500);
+    await step(page, 'after-tab', 'Foco removido do textarea (Tab pressionado)');
 
     // Botão "Gerar" — IMPORTANTE: não usar button[type=submit] pq pega a lupa
     // da barra de busca no topo. Procurar pelo texto literal "Gerar" dentro
@@ -280,6 +315,7 @@ async function _generateShortlinkUnsafe(productUrl) {
       } catch {}
     }
     if (!clicked) throw new Error('Não achei botão "Gerar" habilitado (pode estar disabled por conteúdo inválido)');
+    await step(page, 'clicked', 'Botão Gerar clicado, aguardando link…');
 
     // Aguarda link aparecer. Polling manual em paralelo:
     //   - Verifica network intercept (shortlinks Set)
@@ -315,16 +351,15 @@ async function _generateShortlinkUnsafe(productUrl) {
     }
 
     if (!link) {
-      // SEMPRE salva debug antes de lançar erro
-      const debugInfo = await captureDebug(page, productUrl).catch((e) => {
-        console.warn(`   ⚠️  Falha ao capturar debug: ${e.message}`);
-        return null;
-      });
+      await step(page, 'timeout', 'Timeout esperando shortlink aparecer no DOM/rede');
+      // SEMPRE salva debug final
+      const debugInfo = await captureDebug(page, productUrl, sessionTag).catch(() => null);
       const hint = debugInfo
-        ? ` (debug: ${debugInfo.htmlPath}, ${debugInfo.pngPath})`
+        ? ` (debug: ${path.basename(debugInfo.htmlPath)})`
         : '';
-      throw new Error(`Não consegui extrair o shortlink em 25s — HTML do portal pode ter mudado${hint}`);
+      throw new Error(`Timeout 25s esperando shortlink${hint}`);
     }
+    await step(page, 'success', `Shortlink: ${link}`);
     console.log(`   ✅ shortlink gerado em ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${link}`);
     return link;
   } catch (e) {
@@ -339,12 +374,12 @@ async function _generateShortlinkUnsafe(productUrl) {
  * Salva HTML + screenshot da página atual em /app/auth_state/affiliate/debug/.
  * Retorna paths salvos pra incluir no erro.
  */
-async function captureDebug(page, productUrl) {
+async function captureDebug(page, productUrl, sessionTag) {
   await fs.mkdir(DEBUG_DIR, { recursive: true });
-  const timestamp = Date.now();
-  const htmlPath = path.join(DEBUG_DIR, `fail-${timestamp}.html`);
-  const pngPath = path.join(DEBUG_DIR, `fail-${timestamp}.png`);
-  const metaPath = path.join(DEBUG_DIR, `fail-${timestamp}.json`);
+  const prefix = sessionTag ? `fail-${sessionTag}` : `fail-${Date.now()}`;
+  const htmlPath = path.join(DEBUG_DIR, `${prefix}.html`);
+  const pngPath = path.join(DEBUG_DIR, `${prefix}.png`);
+  const metaPath = path.join(DEBUG_DIR, `${prefix}.json`);
 
   const html = await page.content().catch(() => '<no-content>');
   await fs.writeFile(htmlPath, html);
@@ -354,13 +389,14 @@ async function captureDebug(page, productUrl) {
   });
 
   await fs.writeFile(metaPath, JSON.stringify({
-    timestamp,
+    timestamp: Date.now(),
+    sessionTag,
     productUrl,
     pageUrl: page.url(),
     title: await page.title().catch(() => null),
   }, null, 2));
 
-  console.warn(`   📋 Debug salvo: ${path.basename(htmlPath)}`);
+  console.warn(`   📋 Debug final salvo: ${path.basename(htmlPath)}`);
   return { htmlPath, pngPath, metaPath };
 }
 

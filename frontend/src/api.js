@@ -37,6 +37,9 @@ export const api = {
   affiliateSessionImport: (cookies) => request('/api/affiliate/session/import', { method: 'POST', body: JSON.stringify({ cookies }) }),
   affiliateSessionCheck: () => request('/api/affiliate/session/check', { method: 'POST' }),
   affiliateSessionDisconnect: () => request('/api/affiliate/session/disconnect', { method: 'POST' }),
+  affiliateDebugList: () => request('/api/affiliate/debug'),
+  affiliateDebugFileUrl: (name) => `/api/affiliate/debug/${encodeURIComponent(name)}`,
+  affiliateShortlinkTestUrl: (productUrl) => `/api/affiliate/shortlink/test-stream?url=${encodeURIComponent(productUrl)}`,
 
   // Workspaces
   listWorkspaces: () => request('/api/workspaces'),
