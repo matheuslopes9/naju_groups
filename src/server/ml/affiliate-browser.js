@@ -210,24 +210,28 @@ async function _generateShortlinkUnsafe(productUrl) {
       throw new Error('Sessão expirou — refaça login');
     }
 
-    // Tenta achar o textarea/input do gerador (vários seletores possíveis)
-    const inputSelectors = [
-      'textarea',
-      'input[type="url"]',
-      'input[type="text"][placeholder*="URL" i]',
-      'input[type="text"][placeholder*="url" i]',
-      'input[name*="url" i]',
-      'input[name*="link" i]',
-      'input[placeholder*="produto" i]',
-      'input[placeholder*="cole" i]',
+    // O gerador tem um TEXTAREA específico — usar placeholder "Insira 1 ou mais URLs"
+    // (vi no screenshot). Evita pegar a barra de busca do topo da página.
+    const textareaSelectors = [
+      'textarea[placeholder*="Insira" i]',
+      'textarea[placeholder*="URL" i]',
+      'textarea[placeholder*="url" i]',
+      'main textarea',           // textarea dentro da área principal
+      'form textarea',           // textarea dentro de algum form
+      'textarea',                // fallback
     ];
+    let filledLocator = null;
     let filled = false;
-    for (const sel of inputSelectors) {
+    for (const sel of textareaSelectors) {
       try {
         const el = page.locator(sel).first();
         if (await el.count() > 0) {
+          // Limpa texto residual e preenche
+          await el.click({ timeout: 5000 });
+          await el.fill('', { timeout: 5000 });   // limpa
           await el.fill(productUrl, { timeout: 5000 });
           filled = true;
+          filledLocator = el;
           console.log(`   ✓ campo preenchido com seletor: ${sel}`);
           break;
         }
@@ -235,27 +239,47 @@ async function _generateShortlinkUnsafe(productUrl) {
     }
     if (!filled) throw new Error('Não achei campo de URL no gerador (HTML pode ter mudado)');
 
-    // Botão "Gerar" (vários textos possíveis)
+    // Confirma que o textarea tem o conteúdo certo (validação anti-bug)
+    try {
+      const actualValue = await filledLocator.inputValue();
+      if (!actualValue.includes('mercadoli')) {
+        console.warn(`   ⚠️  textarea com conteúdo inesperado: "${actualValue.slice(0, 60)}…"`);
+      }
+    } catch {}
+
+    // Tira foco do textarea (clica fora) — fecha sugestões da busca + libera botão Gerar
+    await page.keyboard.press('Tab').catch(() => {});
+    await page.waitForTimeout(500);
+
+    // Botão "Gerar" — IMPORTANTE: não usar button[type=submit] pq pega a lupa
+    // da barra de busca no topo. Procurar pelo texto literal "Gerar" dentro
+    // do conteúdo principal (não no header).
     const btnSelectors = [
-      'button:has-text("Gerar")',
-      'button:has-text("Criar")',
-      'button:has-text("Compartilhar")',
-      'button[type="submit"]',
+      'main button:has-text("Gerar")',
+      'form button:has-text("Gerar")',
       'button:has-text("Gerar link")',
+      'button:has-text("Gerar"):not([disabled])',
+      '[role="button"]:has-text("Gerar")',
     ];
     let clicked = false;
     for (const sel of btnSelectors) {
       try {
         const btn = page.locator(sel).first();
-        if (await btn.count() > 0) {
-          await btn.click({ timeout: 5000 });
-          clicked = true;
-          console.log(`   ✓ botão clicado: ${sel}`);
-          break;
+        const count = await btn.count();
+        if (count === 0) continue;
+        // Confere se está habilitado
+        const disabled = await btn.isDisabled().catch(() => false);
+        if (disabled) {
+          console.log(`   ⚠️  botão ${sel} está desabilitado — tentando próximo`);
+          continue;
         }
+        await btn.click({ timeout: 5000 });
+        clicked = true;
+        console.log(`   ✓ botão clicado: ${sel}`);
+        break;
       } catch {}
     }
-    if (!clicked) throw new Error('Não achei botão Gerar');
+    if (!clicked) throw new Error('Não achei botão "Gerar" habilitado (pode estar disabled por conteúdo inválido)');
 
     // Aguarda link aparecer. Polling manual em paralelo:
     //   - Verifica network intercept (shortlinks Set)

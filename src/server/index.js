@@ -23,7 +23,7 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
-const BUILD_TAG = 'v0.5-wa-reset-2026-05-19';
+const BUILD_TAG = 'v0.6-textarea-gerar-2026-05-19';
 
 // API pública
 app.get('/healthz', (_req, res) => res.json({ ok: true, build: BUILD_TAG }));
