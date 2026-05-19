@@ -23,8 +23,11 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
+const BUILD_TAG = 'v0.4-polling-debug-2026-05-19';
+
 // API pública
-app.get('/healthz', (_req, res) => res.json({ ok: true }));
+app.get('/healthz', (_req, res) => res.json({ ok: true, build: BUILD_TAG }));
+app.get('/version', (_req, res) => res.json({ build: BUILD_TAG }));
 app.use('/api/auth', authRouter);
 
 // Callback e authorize do ML são públicos (vêm do redirect do ML).
@@ -57,6 +60,7 @@ if (fs.existsSync(FRONTEND_DIST)) {
 const PORT = Number(process.env.PORT ?? 3000);
 const server = app.listen(PORT, () => {
   console.log(`🌐 HTTP em http://localhost:${PORT}`);
+  console.log(`📌 AdManager build: ${BUILD_TAG}`);
 });
 
 // WebSocket: stream de status WhatsApp → conectado autenticado
