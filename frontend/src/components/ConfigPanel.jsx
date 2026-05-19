@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
 import WorkspaceForm from './WorkspaceForm.jsx';
+import NichePicker from './NichePicker.jsx';
 import { Icon } from './Icon.jsx';
 
 export default function ConfigPanel({ ws, reload }) {
@@ -62,6 +63,16 @@ export default function ConfigPanel({ ws, reload }) {
 
   return (
     <div className="space-y-6">
+      {/* PASSO 0 - Nicho */}
+      <Section
+        number={0}
+        title="Nicho do workspace"
+        helper="Escolha um nicho pré-pronto. Define o público-alvo (feminino/masculino/unissex) e keywords iniciais. Você pode editar depois em Filtros."
+        icon={Icon.Tag}
+      >
+        <NichePicker ws={ws} reload={reload} />
+      </Section>
+
       {/* PASSO 1 - Fontes */}
       <Section
         number={1}
@@ -169,9 +180,113 @@ export default function ConfigPanel({ ws, reload }) {
         </div>
       </Section>
 
-      {/* PASSO 4 - Agente IA / Auto-aprovação */}
+      {/* PASSO 4 - Estilo do anúncio enviado no WhatsApp */}
+      <AdStyleSection ws={ws} reload={reload} />
+
+      {/* PASSO 5 - Agente IA / Auto-aprovação */}
       <AutoApproveSection ws={ws} reload={reload} />
     </div>
+  );
+}
+
+function AdStyleSection({ ws, reload }) {
+  const [style, setStyle] = useState(ws.adStyle ?? 'compact');
+  const [typing, setTyping] = useState(ws.typingSimulation ?? true);
+
+  async function saveStyle(v) {
+    setStyle(v);
+    try {
+      await api.updateWorkspace(ws.id, { adStyle: v });
+      toast.success(`Estilo alterado para ${v === 'rich' ? 'elaborado' : 'compacto'}`);
+      reload();
+    } catch (e) { toast.error(e.message); setStyle(ws.adStyle ?? 'compact'); }
+  }
+
+  async function saveTyping(v) {
+    setTyping(v);
+    try {
+      await api.updateWorkspace(ws.id, { typingSimulation: v });
+      reload();
+    } catch (e) { toast.error(e.message); setTyping(!v); }
+  }
+
+  return (
+    <Section
+      number={4}
+      title="Estilo do anúncio"
+      helper="Como a mensagem fica no WhatsApp do grupo. Ajusta automaticamente conforme o público (feminino/masculino)."
+      icon={Icon.Sparkles}
+    >
+      <div className="space-y-4">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => saveStyle('compact')}
+            className={`text-left p-3 rounded-lg border transition cursor-pointer ${
+              style === 'compact' ? 'border-indigo-500/60' : 'border-transparent hover:border-slate-600'
+            }`}
+            style={{
+              background: style === 'compact' ? 'rgba(99,102,241,0.12)' : 'rgba(var(--bg-elevated), 0.6)',
+            }}
+          >
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="font-medium text-sm">📋 Compacto</span>
+              {style === 'compact' && <Icon.Check width={14} height={14} className="text-indigo-400" />}
+            </div>
+            <pre className="text-[10px] whitespace-pre-wrap leading-snug opacity-70 font-mono">
+{`MAIS UM 👇
+
+*Nome do produto*
+
+De ~R$ 100~ por *R$ 60* 💰
+📉 *40% OFF*
+🚚 Frete grátis
+
+🛒 https://meli.la/...
+
+_Aproveite enquanto dura ⏰_`}
+            </pre>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => saveStyle('rich')}
+            className={`text-left p-3 rounded-lg border transition cursor-pointer ${
+              style === 'rich' ? 'border-indigo-500/60' : 'border-transparent hover:border-slate-600'
+            }`}
+            style={{
+              background: style === 'rich' ? 'rgba(99,102,241,0.12)' : 'rgba(var(--bg-elevated), 0.6)',
+            }}
+          >
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="font-medium text-sm">✨ Elaborado</span>
+              {style === 'rich' && <Icon.Check width={14} height={14} className="text-indigo-400" />}
+            </div>
+            <pre className="text-[10px] whitespace-pre-wrap leading-snug opacity-70 font-mono">
+{`OLHA SÓ ESSA 👀
+
+*Nome do produto*
+
+💸 ~De R$ 100~
+💰 *Por R$ 60* (40% OFF)
+
+🚚 *Frete grátis*
+🎟️ *Cupom 10% no Pix*
+🔥 *500+ pessoas compraram*
+
+🛒 https://meli.la/...`}
+            </pre>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3 pt-2">
+          <Toggle checked={typing} onChange={saveTyping} />
+          <span className="text-sm" style={{ color: 'rgb(var(--text-muted))' }}>
+            {typing ? '⌨️ Simula "digitando…" antes de enviar (mais humano)' : 'Envia direto sem typing'}
+          </span>
+        </div>
+      </div>
+    </Section>
   );
 }
 
@@ -179,6 +294,7 @@ function AutoApproveSection({ ws, reload }) {
   const [enabled, setEnabled] = useState(ws.autoApproveEnabled ?? false);
   const [threshold, setThreshold] = useState(ws.autoApproveThreshold ?? 80);
   const [maxDaily, setMaxDaily] = useState(ws.autoApproveMaxDaily ?? 10);
+  const [minInterval, setMinInterval] = useState(ws.autoApproveMinIntervalMin ?? 6);
 
   async function saveField(key, value) {
     try {
@@ -198,10 +314,10 @@ function AutoApproveSection({ ws, reload }) {
 
   return (
     <Section
-      number={4}
+      number={5}
       title="🤖 Agente IA (auto-aprovação)"
       helper="Quando ligado, ofertas com score >= threshold são aprovadas, têm shortlink gerado automaticamente e enviadas pros grupos. EXIGE sessão de afiliado conectada em Configurações."
-      icon={Icon.Sparkles}
+      icon={Icon.Zap}
     >
       <div className="space-y-4">
         <div className="flex items-center gap-3">
@@ -212,9 +328,9 @@ function AutoApproveSection({ ws, reload }) {
         </div>
 
         {enabled && (
-          <div className="grid sm:grid-cols-2 gap-4 animate-fade-in">
+          <div className="grid sm:grid-cols-3 gap-4 animate-fade-in">
             <label className="block">
-              <span className="block text-sm font-medium mb-1.5">Score mínimo para aprovar</span>
+              <span className="block text-sm font-medium mb-1.5">Score mínimo</span>
               <input
                 type="number" min="0" max="100"
                 value={threshold}
@@ -223,11 +339,11 @@ function AutoApproveSection({ ws, reload }) {
                 className="input"
               />
               <p className="text-xs mt-1" style={{ color: 'rgb(var(--text-muted))' }}>
-                0-100. Recomendado: 80+ (só ofertas top). Quanto menor, mais agressivo.
+                0-100. Recomendado: 80+
               </p>
             </label>
             <label className="block">
-              <span className="block text-sm font-medium mb-1.5">Máximo por dia</span>
+              <span className="block text-sm font-medium mb-1.5">Máx por dia</span>
               <input
                 type="number" min="1" max="100"
                 value={maxDaily}
@@ -236,7 +352,20 @@ function AutoApproveSection({ ws, reload }) {
                 className="input"
               />
               <p className="text-xs mt-1" style={{ color: 'rgb(var(--text-muted))' }}>
-                Limite de aprovações automáticas. Evita spam no grupo.
+                Limite diário de envios
+              </p>
+            </label>
+            <label className="block">
+              <span className="block text-sm font-medium mb-1.5">Intervalo mínimo (min)</span>
+              <input
+                type="number" min="1" max="120"
+                value={minInterval}
+                onChange={(e) => setMinInterval(Number(e.target.value))}
+                onBlur={() => saveField('autoApproveMinIntervalMin', minInterval)}
+                className="input"
+              />
+              <p className="text-xs mt-1" style={{ color: 'rgb(var(--text-muted))' }}>
+                Espaçamento entre envios. 6min = ~10/h
               </p>
             </label>
           </div>

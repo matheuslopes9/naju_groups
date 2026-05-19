@@ -290,11 +290,26 @@ class WhatsappManager extends EventEmitter {
     }));
   }
 
-  async sendMessage(workspaceId, jid, { text, image, caption }) {
+  async sendMessage(workspaceId, jid, { text, image, caption, simulateTyping = false }) {
     const s = this.sessions.get(workspaceId);
     if (!s?.sock || s.status !== 'connected') {
       throw new Error('WhatsApp não conectado');
     }
+
+    // Simulação de "digitando…" — humaniza envio em massa
+    if (simulateTyping) {
+      try {
+        await s.sock.sendPresenceUpdate('composing', jid);
+        // Tempo proporcional ao tamanho do texto (40 caracteres/seg, mín 1.5s, máx 5s)
+        const charCount = (caption ?? text ?? '').length;
+        const typingMs = Math.min(5000, Math.max(1500, charCount * 25));
+        await new Promise((r) => setTimeout(r, typingMs));
+        await s.sock.sendPresenceUpdate('paused', jid);
+      } catch (e) {
+        // ignora falha de presence — não trava envio
+      }
+    }
+
     const payload = image
       ? { image: { url: image }, caption: caption ?? text }
       : { text };

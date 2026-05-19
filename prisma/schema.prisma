@@ -28,10 +28,16 @@ model Workspace {
   priceMin     Float?   @map("price_min")
   priceMax     Float?   @map("price_max")
   cooldownDays Int      @default(30) @map("cooldown_days")
+  // Nicho + público (preset escolhido pelo usuário)
+  nichePreset  String? @map("niche_preset") // ex: 'beauty-f', 'tech', 'fitness-m'
+  audience     String? // 'female', 'male', 'unisex' (derivado do nicho)
+  adStyle      String  @default("compact") @map("ad_style") // 'compact' ou 'rich'
+  typingSimulation Boolean @default(true) @map("typing_simulation")
   // Auto-aprovação (agente IA)
   autoApproveEnabled   Boolean @default(false) @map("auto_approve_enabled")
   autoApproveThreshold Int     @default(80) @map("auto_approve_threshold")
   autoApproveMaxDaily  Int     @default(10) @map("auto_approve_max_daily")
+  autoApproveMinIntervalMin Int @default(6) @map("auto_approve_min_interval_min")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 

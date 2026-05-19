@@ -37,6 +37,15 @@ async function countTodayApprovals(workspaceId) {
   });
 }
 
+async function lastApprovalAt(workspaceId) {
+  const row = await prisma.agentAction.findFirst({
+    where: { workspaceId, action: 'approve' },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true },
+  });
+  return row?.createdAt ?? null;
+}
+
 /**
  * Processa um workspace: pega ofertas pendentes com score >= threshold,
  * gera shortlink, envia, marca como sent.
@@ -63,6 +72,21 @@ export async function runAgentForWorkspace(ws) {
     return { processed: 0, sent: 0, skipReason: 'daily-limit-reached' };
   }
 
+  // Respeita intervalo mínimo entre envios (default 6 min = 10/hora)
+  const minIntervalMs = (ws.autoApproveMinIntervalMin ?? 6) * 60 * 1000;
+  const lastAt = await lastApprovalAt(ws.id);
+  if (lastAt) {
+    const elapsed = Date.now() - lastAt.getTime();
+    if (elapsed < minIntervalMs) {
+      const waitSec = Math.ceil((minIntervalMs - elapsed) / 1000);
+      await logAgentAction('skip', {
+        workspaceId: ws.id,
+        reason: `Throttle: aguardando ${waitSec}s pro próximo envio (mínimo ${ws.autoApproveMinIntervalMin}min)`,
+      });
+      return { processed: 0, sent: 0, skipReason: 'throttle' };
+    }
+  }
+
   const groups = await prisma.group.findMany({
     where: { workspaceId: ws.id, type: 'staging', enabled: true },
   });
@@ -70,21 +94,25 @@ export async function runAgentForWorkspace(ws) {
     return { processed: 0, sent: 0, skipReason: 'no-groups' };
   }
 
+  // Pega só UMA oferta por execução do agente (throttle natural).
+  // O worker roda a cada 60s e checa o intervalo mínimo na próxima iteração.
   const candidates = await prisma.offer.findMany({
     where: {
       workspaceId: ws.id,
       status: 'pending',
       score: { gte: ws.autoApproveThreshold },
-      // só sem shortlink (com shortlink, o agente também pode processar)
     },
     orderBy: [{ score: 'desc' }, { createdAt: 'asc' }],
-    take: remaining,
+    take: 1,
   });
+
+  if (candidates.length === 0) {
+    return { processed: 0, sent: 0, skipReason: 'no-candidates' };
+  }
 
   let sent = 0;
   for (const offer of candidates) {
     try {
-      // 1. Gera shortlink se não tiver
       let shortlink = offer.shortlink;
       if (!shortlink) {
         shortlink = await generateShortlink(offer.permalink);
@@ -94,7 +122,7 @@ export async function runAgentForWorkspace(ws) {
         });
       }
 
-      // 2. Envia pros grupos
+      // Formata com estilo + audience do workspace
       const text = formatOffer({
         title: offer.title,
         price: offer.price,
@@ -105,13 +133,20 @@ export async function runAgentForWorkspace(ws) {
         affiliateUrl: shortlink,
         coupon: offer.coupon,
         highlight: offer.highlight,
+        productId: offer.productId,
+      }, {
+        style: ws.adStyle ?? 'compact',
+        audience: ws.audience ?? 'unisex',
       });
 
       for (const g of groups) {
-        await waManager.sendMessage(ws.id, g.jid, { image: offer.imageUrl, caption: text });
+        await waManager.sendMessage(ws.id, g.jid, {
+          image: offer.imageUrl,
+          caption: text,
+          simulateTyping: ws.typingSimulation ?? true,
+        });
       }
 
-      // 3. Marca como sent
       await prisma.offer.update({
         where: { id: offer.id },
         data: { status: 'sent', sentAt: new Date() },
@@ -130,7 +165,6 @@ export async function runAgentForWorkspace(ws) {
         offerId: offer.id,
         reason: e.message,
       });
-      // não para o loop — tenta as próximas
     }
   }
 

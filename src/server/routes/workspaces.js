@@ -7,6 +7,7 @@ import { audit } from '../audit.js';
 import { fetchItemByUrl, AVAILABLE_SOURCES } from '../ml/scraper.js';
 import { attachAffiliateTag } from '../ml/affiliate.js';
 import { getAffiliateTag } from '../ml/oauth.js';
+import { NICHE_PRESETS, findNiche } from '../ml/niches.js';
 
 const router = Router();
 
@@ -127,6 +128,7 @@ router.patch('/:id', async (req, res) => {
     'minDiscount', 'onlyFreeShipping', 'onlyDeals', 'maxPerRun', 'intervalMin', 'autoSearch',
     'keywords', 'priceMin', 'priceMax', 'cooldownDays',
     'autoApproveEnabled', 'autoApproveThreshold', 'autoApproveMaxDaily',
+    'autoApproveMinIntervalMin', 'nichePreset', 'audience', 'adStyle', 'typingSimulation',
   ];
   const data = {};
   for (const k of allowed) if (k in (req.body ?? {})) data[k] = req.body[k];
@@ -238,6 +240,31 @@ router.delete('/:id/groups/:groupId', async (req, res) => {
 // Lista as fontes disponíveis (validadas empiricamente)
 router.get('/ml/sources', async (_req, res) => {
   res.json(AVAILABLE_SOURCES);
+});
+
+// Lista os nichos pré-cadastrados pra dropdown no workspace
+router.get('/ml/niches', async (_req, res) => {
+  res.json(NICHE_PRESETS);
+});
+
+// Aplica um preset de nicho ao workspace: copia keywords + audience
+router.post('/:id/apply-niche', async (req, res) => {
+  const { nicheId } = req.body ?? {};
+  const niche = findNiche(nicheId);
+  if (!niche) return res.status(400).json({ error: 'nicho desconhecido' });
+  const updated = await prisma.workspace.update({
+    where: { id: req.params.id },
+    data: {
+      nichePreset: niche.id,
+      audience: niche.audience,
+      keywords: niche.keywords,
+    },
+  });
+  audit('workspace.niche_applied', {
+    entity: 'workspace', entityId: req.params.id, workspaceId: req.params.id,
+    payload: { nicheId: niche.id, label: niche.label },
+  });
+  res.json(updated);
 });
 
 router.get('/:id/sources', async (req, res) => {
@@ -451,6 +478,9 @@ router.post('/:id/offers/:offerId/approve', async (req, res) => {
   // Prioriza shortlink oficial (gerado no portal); fallback pro affiliate_url com ?tag=
   const finalUrl = offer.shortlink || offer.affiliateUrl;
 
+  // Busca config completa do workspace pra usar adStyle / audience / typing
+  const ws = await prisma.workspace.findUnique({ where: { id: req.params.id } });
+
   const text = formatOffer({
     title: offer.title,
     price: offer.price,
@@ -461,10 +491,18 @@ router.post('/:id/offers/:offerId/approve', async (req, res) => {
     affiliateUrl: finalUrl,
     coupon: offer.coupon,
     highlight: offer.highlight,
+    productId: offer.productId,
+  }, {
+    style: ws?.adStyle ?? 'compact',
+    audience: ws?.audience ?? 'unisex',
   });
 
   for (const g of groups) {
-    await waManager.sendMessage(req.params.id, g.jid, { image: offer.imageUrl, caption: text });
+    await waManager.sendMessage(req.params.id, g.jid, {
+      image: offer.imageUrl,
+      caption: text,
+      simulateTyping: ws?.typingSimulation ?? true,
+    });
   }
 
   await prisma.offer.update({

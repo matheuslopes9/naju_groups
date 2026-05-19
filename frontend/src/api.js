@@ -62,6 +62,10 @@ export const api = {
   addGroup: (id, data) => request(`/api/workspaces/${id}/groups`, { method: 'POST', body: JSON.stringify(data) }),
   deleteGroup: (id, gid) => request(`/api/workspaces/${id}/groups/${gid}`, { method: 'DELETE' }),
 
+  // Nichos pré-cadastrados
+  availableNiches: () => request('/api/workspaces/ml/niches'),
+  applyNiche: (id, nicheId) => request(`/api/workspaces/${id}/apply-niche`, { method: 'POST', body: JSON.stringify({ nicheId }) }),
+
   // Fontes de scraping
   availableSources: () => request('/api/workspaces/ml/sources'),
   listSources: (id) => request(`/api/workspaces/${id}/sources`),
