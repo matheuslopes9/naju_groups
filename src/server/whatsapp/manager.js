@@ -24,6 +24,7 @@ import {
 import QRCode from 'qrcode';
 import pino from 'pino';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../db.js';
 
@@ -37,6 +38,21 @@ class WhatsappManager extends EventEmitter {
 
   authStatePath(workspaceId) {
     return path.join('./auth_state/wa', workspaceId);
+  }
+
+  /**
+   * Apaga as credenciais salvas de um workspace. Usado quando o device
+   * foi removido pelo usuário no WhatsApp ou Baileys retorna 401 —
+   * credenciais antigas estão inválidas e bloqueiam novo QR.
+   */
+  async clearCredentials(workspaceId) {
+    const dir = this.authStatePath(workspaceId);
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
+      console.log(`   🗑️  credenciais limpas: ${dir}`);
+    } catch (e) {
+      // diretório pode nem existir, ignora
+    }
   }
 
   getSession(workspaceId) {
@@ -137,19 +153,37 @@ class WhatsappManager extends EventEmitter {
         const err = lastDisconnect?.error;
         const code = err?.output?.statusCode;
         const errMessage = err?.message ?? '';
+        // Inspecionar o conteúdo XML do stream:error (Baileys empacota em err.data.attrs)
+        const errAttrs = err?.data?.attrs ?? {};
+        const errContent = err?.data?.content?.[0]?.attrs ?? {};
+        const conflictType = errContent.type ?? '';
+
         const isConflict =
           errMessage.includes('replaced') ||
-          errMessage.includes('conflict') ||
+          conflictType === 'replaced' ||
           code === 440 ||
           code === DisconnectReason.connectionReplaced;
-        const loggedOut = code === DisconnectReason.loggedOut;
+
+        // device_removed = usuário removeu o aparelho pelo WhatsApp do celular,
+        // ou WhatsApp invalidou a sessão. Credenciais antigas são INÚTEIS,
+        // precisa apagar e gerar QR novo.
+        const isDeviceRemoved =
+          conflictType === 'device_removed' ||
+          code === 401 ||
+          errAttrs.code === '401' ||
+          code === DisconnectReason.loggedOut;
 
         // Decisão de reconexão
         let nextStatus;
         let willReconnect = false;
 
-        if (loggedOut) {
+        if (isDeviceRemoved) {
+          // Apaga credenciais antigas — elas são inválidas e bloqueiam novo QR
+          await this.clearCredentials(workspaceId).catch((e) =>
+            console.warn(`   ⚠️  Falha ao limpar credenciais de ${workspaceId}: ${e.message}`)
+          );
           nextStatus = 'disconnected';
+          console.warn(`🔓 [${workspaceId}] Sessão WhatsApp invalidada (device_removed/401). Credenciais apagadas — pronto para novo QR.`);
         } else if (isConflict) {
           nextStatus = 'conflict';
           console.warn(`⚠️ [${workspaceId}] WhatsApp em conflito — outro aparelho usando o mesmo número. Não reconectando automaticamente.`);

@@ -176,6 +176,20 @@ router.post('/:id/whatsapp/pause', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Reset completo: para sessão + apaga credenciais + permite gerar QR novo
+router.post('/:id/whatsapp/reset', async (req, res) => {
+  try {
+    await waManager.stop(req.params.id).catch(() => {});
+    await waManager.clearCredentials(req.params.id);
+    await prisma.whatsappSession.update({
+      where: { workspaceId: req.params.id },
+      data: { status: 'disconnected', phoneNumber: null },
+    }).catch(() => {});
+    audit('wa.reset', { entity: 'wa', workspaceId: req.params.id });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/:id/whatsapp/resume', async (req, res) => {
   await waManager.resume(req.params.id);
   audit('wa.resume', { entity: 'wa', workspaceId: req.params.id });

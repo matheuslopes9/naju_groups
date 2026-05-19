@@ -48,6 +48,15 @@ export default function WhatsAppPanel({ ws, reload }) {
     catch (e) { toast.error(e.message); }
     finally { setBusy(false); poll(); }
   }
+  async function resetSession() {
+    if (!confirm('Reset COMPLETO: apaga credenciais salvas e prepara o workspace pra gerar um QR novo. Use quando a sessão estiver travada (device removido, 401, init queries timeout).')) return;
+    setBusy(true);
+    try {
+      await api.waReset(ws.id);
+      toast.success('Sessão resetada — clique em Conectar pra gerar novo QR');
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); poll(); reload(); }
+  }
 
   const st = status?.status ?? 'disconnected';
   const isConnected = st === 'connected';
@@ -103,8 +112,22 @@ export default function WhatsAppPanel({ ws, reload }) {
               </button>
             )}
             {isConnecting && (
-              <button onClick={pauseSession} disabled={busy} className="btn btn-secondary !text-xs">
-                <Icon.X width={14} height={14} /> Cancelar
+              <>
+                <button onClick={pauseSession} disabled={busy} className="btn btn-secondary !text-xs">
+                  <Icon.X width={14} height={14} /> Cancelar
+                </button>
+                <button onClick={resetSession} disabled={busy}
+                        className="btn btn-ghost !text-xs !text-amber-400"
+                        title="Use se o status ficar 'connecting' por muito tempo">
+                  <Icon.RefreshCw width={14} height={14} /> Resetar
+                </button>
+              </>
+            )}
+            {!isConnecting && (st === 'disconnected' || isConflict || isPaused || isConnected) && (
+              <button onClick={resetSession} disabled={busy}
+                      className="btn btn-ghost !text-xs !text-amber-400"
+                      title="Apaga credenciais e prepara pra QR novo">
+                <Icon.RefreshCw width={14} height={14} /> Reset
               </button>
             )}
           </div>

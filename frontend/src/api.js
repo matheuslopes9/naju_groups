@@ -50,6 +50,7 @@ export const api = {
   waDisconnect: (id) => request(`/api/workspaces/${id}/whatsapp/disconnect`, { method: 'POST' }),
   waPause: (id) => request(`/api/workspaces/${id}/whatsapp/pause`, { method: 'POST' }),
   waResume: (id) => request(`/api/workspaces/${id}/whatsapp/resume`, { method: 'POST' }),
+  waReset: (id) => request(`/api/workspaces/${id}/whatsapp/reset`, { method: 'POST' }),
   waStatus: (id) => request(`/api/workspaces/${id}/whatsapp/status`),
   waListGroups: (id) => request(`/api/workspaces/${id}/whatsapp/groups`),
 
