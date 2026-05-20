@@ -14,6 +14,7 @@
  * (a até 6h atrás) ainda não foi varrido, dispara imediatamente pra
  * recuperar o atraso.
  */
+import { EventEmitter } from 'node:events';
 import { prisma } from './db.js';
 import { SOURCE_CATALOG } from './ml/sources-catalog.js';
 import { scrapeCatalogSource, scoreOffer, matchKeywords } from './ml/scraper.js';
@@ -28,6 +29,25 @@ const SP_OFFSET_MIN = -180; // UTC-3
 
 let lastSweepAt = 0;
 let sweepInFlight = false;
+
+// EventEmitter pra broadcast de eventos da varredura corrente.
+// Múltiplos clientes podem se inscrever via /sweep/stream e receber os
+// MESMOS eventos, independente de quem disparou a varredura (cron ou user).
+// Buffer guarda eventos da varredura corrente pra clientes que conectam
+// no meio receberem o histórico.
+export const sweepEmitter = new EventEmitter();
+sweepEmitter.setMaxListeners(50); // múltiplos browsers podem conectar
+let sweepBuffer = []; // limpa ao iniciar nova varredura
+const MAX_BUFFER = 1000;
+
+function emitSweep(evt) {
+  if (sweepBuffer.length < MAX_BUFFER) sweepBuffer.push(evt);
+  sweepEmitter.emit('event', evt);
+}
+
+export function getSweepBuffer() {
+  return sweepBuffer.slice();
+}
 
 /**
  * Converte um Date UTC pra { hour, dayShift } em horário de Brasília.
@@ -292,10 +312,14 @@ export async function runCatalogSweep(onProgress) {
   }
   sweepInFlight = true;
   lastSweepAt = Date.now();
+  sweepBuffer = []; // limpa buffer pra esta varredura
+
+  // Emit + chama onProgress legado (clientes diretos)
+  const emit = (evt) => { emitSweep(evt); onProgress?.(evt); };
 
   try {
     console.log('\n🌐 Iniciando varredura completa do catálogo (15 fontes)...');
-    onProgress?.({ stage: 'start', totalSources: SOURCE_CATALOG.length });
+    emit({ stage: 'start', totalSources: SOURCE_CATALOG.length });
 
     let totalScanned = 0;
     let totalUpserted = 0;
@@ -306,7 +330,7 @@ export async function runCatalogSweep(onProgress) {
       i++;
       const maxPages = Number(process.env.CATALOG_MAX_PAGES ?? source.pages);
 
-      onProgress?.({
+      emit({
         stage: 'source-start',
         current: i,
         total: SOURCE_CATALOG.length,
@@ -318,11 +342,11 @@ export async function runCatalogSweep(onProgress) {
       let offers = [];
       try {
         offers = await scrapeCatalogSource(source.id, maxPages, (p) => {
-          onProgress?.({ stage: 'page', sourceId: source.id, current: i, total: SOURCE_CATALOG.length, ...p });
+          emit({ stage: 'page', sourceId: source.id, current: i, total: SOURCE_CATALOG.length, ...p });
         });
       } catch (e) {
         console.warn(`   ❌ [${source.label}] erro:`, e.message);
-        onProgress?.({ stage: 'source-error', sourceId: source.id, error: e.message });
+        emit({ stage: 'source-error', sourceId: source.id, error: e.message });
         continue;
       }
       totalScanned += offers.length;
@@ -341,7 +365,7 @@ export async function runCatalogSweep(onProgress) {
         }
       }
 
-      onProgress?.({
+      emit({
         stage: 'source-done',
         sourceId: source.id,
         current: i,
@@ -360,24 +384,27 @@ export async function runCatalogSweep(onProgress) {
       try {
         const stats = await distributeToWorkspace(ws);
         totalSavedToOffers += stats.saved;
-        if (stats.saved > 0) console.log(`   → [${ws.name}] +${stats.saved} ofertas salvas (${stats.passed} passaram filtros de ${stats.total})`);
+        if (stats.saved > 0) {
+          console.log(`   → [${ws.name}] +${stats.saved} ofertas salvas (${stats.passed} passaram filtros de ${stats.total})`);
+          emit({ stage: 'workspace-distribute', workspace: ws.name, saved: stats.saved, passed: stats.passed, total: stats.total });
+        }
 
         const r = await enqueueApprovedOffers(ws, 500);
         totalEnqueued += r.enqueued;
-        if (r.enqueued > 0) console.log(`   📅 [${ws.name}] ${r.enqueued} enfileiradas`);
+        if (r.enqueued > 0) {
+          console.log(`   📅 [${ws.name}] ${r.enqueued} enfileiradas`);
+          emit({ stage: 'workspace-enqueue', workspace: ws.name, enqueued: r.enqueued });
+        }
       } catch (e) {
         console.warn(`   ❌ [${ws.name}] distribute falhou:`, e.message);
+        emit({ stage: 'workspace-error', workspace: ws.name, error: e.message });
       }
     }
 
     console.log(`\n✅ Varredura concluída: ${totalScanned} scaneadas, ${totalUpserted} no banco global, ${totalSavedToOffers} novas em workspaces, ${totalEnqueued} enfileiradas\n`);
-    onProgress?.({
-      stage: 'done',
-      totalScanned,
-      totalSaved: totalSavedToOffers,
-      totalEnqueued,
-    });
-    return { totalScanned, totalUpserted, totalSaved: totalSavedToOffers, totalEnqueued, workspaces: workspaces.length };
+    const result = { totalScanned, totalUpserted, totalSaved: totalSavedToOffers, totalEnqueued, workspaces: workspaces.length };
+    emit({ stage: 'done', ...result });
+    return result;
   } finally {
     sweepInFlight = false;
   }

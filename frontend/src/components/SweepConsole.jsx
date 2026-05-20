@@ -22,15 +22,30 @@ export default function SweepConsole({ onTrigger }) {
   const [open, setOpen] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const consoleRef = useRef(null);
+  const esRef = useRef(null);
 
   async function refreshStatus() {
     try { setStatus(await api.sweepStatus()); } catch {}
   }
 
+  // Polling de status + auto-attach: se o backend reportar inFlight=true
+  // e o console não tiver stream aberto, anexa automaticamente.
   useEffect(() => {
     refreshStatus();
-    const t = setInterval(refreshStatus, 30_000);
+    const t = setInterval(refreshStatus, 10_000);
     return () => clearInterval(t);
+  }, []);
+
+  // Quando status indica inFlight e ainda não temos stream, abre
+  useEffect(() => {
+    if (status?.inFlight && !esRef.current && !sweeping) {
+      attachStream(true);
+    }
+  }, [status?.inFlight]);
+
+  // Cleanup do EventSource ao desmontar
+  useEffect(() => {
+    return () => { esRef.current?.close(); esRef.current = null; };
   }, []);
 
   // Auto-scroll quando chega linha nova
@@ -48,25 +63,29 @@ export default function SweepConsole({ onTrigger }) {
     });
   }
 
-  function startSweep() {
-    if (sweeping) return;
-    setLines([]);
+  function attachStream(isAttaching) {
+    if (sweeping || esRef.current) return;
+    if (!isAttaching) setLines([]);
     setOpen(true);
     setSweeping(true);
     setAutoScroll(true);
-    pushLine({ stage: 'connecting', message: 'Conectando ao servidor…' });
+    if (!isAttaching) pushLine({ stage: 'connecting', message: 'Conectando ao servidor…' });
 
     const es = new EventSource(api.sweepStreamUrl());
-    es.onopen = () => pushLine({ stage: 'connected', message: 'Conectado. Iniciando varredura…' });
+    esRef.current = es;
+    es.onopen = () => {
+      if (!isAttaching) pushLine({ stage: 'connected', message: 'Conectado. Iniciando varredura…' });
+    };
     es.onmessage = (m) => {
       try {
         const evt = JSON.parse(m.data);
         pushLine(evt);
-        if (evt.stage === 'finished' || evt.stage === 'error') {
+        if (evt.stage === 'done' || evt.stage === 'finished' || evt.stage === 'error') {
           es.close();
+          esRef.current = null;
           setSweeping(false);
           refreshStatus();
-          if (evt.stage === 'finished') {
+          if (evt.stage === 'done' || evt.stage === 'finished') {
             toast.success(`Varredura: ${evt.totalSaved ?? 0} novas, ${evt.totalEnqueued ?? 0} enfileiradas`);
             onTrigger?.();
           } else {
@@ -79,9 +98,15 @@ export default function SweepConsole({ onTrigger }) {
     };
     es.onerror = () => {
       es.close();
+      esRef.current = null;
       setSweeping(false);
-      pushLine({ stage: 'error', message: 'Conexão perdida' });
+      // Não loga "conexão perdida" se foi cleanup normal (status passou pra not-inFlight)
+      if (status?.inFlight) pushLine({ stage: 'error', message: 'Conexão perdida' });
     };
+  }
+
+  function startSweep() {
+    attachStream(false);
   }
 
   function clear() { setLines([]); }
@@ -202,6 +227,14 @@ function formatEvent(evt) {
       return { color: 'text-slate-400', text: '◌ ' + (evt.message ?? 'conectando…') };
     case 'connected':
       return { color: 'text-slate-300', text: '◉ ' + (evt.message ?? 'conectado') };
+    case 'attached':
+      return { color: 'text-amber-300', text: '◇ ' + (evt.message ?? 'anexado à varredura em andamento') };
+    case 'workspace-distribute':
+      return { color: 'text-cyan-200', text: `   → [${evt.workspace}] +${evt.saved} ofertas salvas (${evt.passed}/${evt.total} passaram)` };
+    case 'workspace-enqueue':
+      return { color: 'text-indigo-300', text: `   📅 [${evt.workspace}] ${evt.enqueued} ofertas enfileiradas pra envio` };
+    case 'workspace-error':
+      return { color: 'text-rose-400', text: `   ✗ [${evt.workspace}] erro: ${evt.error}` };
     case 'start':
       return {
         color: 'text-cyan-400 font-semibold',

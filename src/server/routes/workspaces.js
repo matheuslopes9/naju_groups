@@ -7,7 +7,7 @@ import { fetchItemByUrl, listCatalogSources } from '../ml/scraper.js';
 import { attachAffiliateTag } from '../ml/affiliate.js';
 import { getAffiliateTag } from '../ml/oauth.js';
 import { NICHE_PRESETS, findNiche } from '../ml/niches.js';
-import { runCatalogSweep, getCatalogSweepStatus, distributeToWorkspace, applyWorkspaceFilters } from '../catalog-worker.js';
+import { runCatalogSweep, getCatalogSweepStatus, distributeToWorkspace, applyWorkspaceFilters, sweepEmitter, getSweepBuffer } from '../catalog-worker.js';
 import { getQueueStats, listUpcoming, enqueueApprovedOffers, rescheduleQueue } from '../queue.js';
 
 const router = Router();
@@ -303,19 +303,52 @@ router.get('/catalog/sweep/status', async (_req, res) => {
   res.json({ ...status, hasSweptToday });
 });
 
-// Dispara varredura manual do catálogo (SSE: stream do progresso)
+// SSE da varredura. Comportamento:
+//   - Se nenhuma varredura rolando → dispara nova e stream os eventos
+//   - Se já tem uma rolando (cron OU outro user disparou) → anexa,
+//     faz replay dos eventos do buffer e segue ouvindo emitter
+// Resultado: múltiplos clientes podem ver A MESMA varredura ao vivo.
 router.get('/catalog/sweep/stream', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
-  const send = (evt) => res.write(`data: ${JSON.stringify(evt)}\n\n`);
 
-  runCatalogSweep((evt) => send(evt))
-    .then((r) => { send({ stage: 'finished', ...r }); res.end(); })
-    .catch((e) => { send({ stage: 'error', error: e.message }); res.end(); });
+  const send = (evt) => {
+    try { res.write(`data: ${JSON.stringify(evt)}\n\n`); } catch {}
+  };
 
-  req.on('close', () => res.end());
+  const status = getCatalogSweepStatus();
+  const listener = (evt) => send(evt);
+
+  if (status.inFlight) {
+    // Anexa: replay do buffer + ouve futuros
+    send({ stage: 'attached', message: 'Varredura já em andamento, anexando ao stream' });
+    for (const evt of getSweepBuffer()) send(evt);
+    sweepEmitter.on('event', listener);
+  } else {
+    // Inicia nova varredura. emitter já cuida do broadcast.
+    sweepEmitter.on('event', listener);
+    runCatalogSweep().catch((e) => send({ stage: 'error', error: e.message }));
+  }
+
+  // Encerra stream quando varredura termina (done|error|finished)
+  const cleanup = () => {
+    sweepEmitter.off('event', listener);
+    try { res.end(); } catch {}
+  };
+  const finalize = (evt) => {
+    if (evt && (evt.stage === 'done' || evt.stage === 'finished' || evt.stage === 'error')) {
+      // Pequeno delay pra garantir que o último evento foi flushed
+      setTimeout(cleanup, 100);
+    }
+  };
+  sweepEmitter.on('event', finalize);
+
+  req.on('close', () => {
+    sweepEmitter.off('event', finalize);
+    cleanup();
+  });
 });
 
 // Lista os nichos pré-cadastrados pra dropdown no workspace
