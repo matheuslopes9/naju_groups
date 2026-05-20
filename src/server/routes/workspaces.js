@@ -9,6 +9,9 @@ import { getAffiliateTag } from '../ml/oauth.js';
 import { NICHE_PRESETS, findNiche } from '../ml/niches.js';
 import { runCatalogSweep, getCatalogSweepStatus, distributeToWorkspace, applyWorkspaceFilters, sweepEmitter, getSweepBuffer } from '../catalog-worker.js';
 import { getQueueStats, listUpcoming, enqueueApprovedOffers, rescheduleQueue } from '../queue.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('api');
 
 const router = Router();
 
@@ -178,7 +181,7 @@ router.patch('/:id', async (req, res) => {
       const r = await rescheduleQueue(ws);
       rescheduled = r.rescheduled;
     } catch (e) {
-      console.warn(`reschedule queue ws=${ws.id}:`, e.message);
+      log.warn('reschedule queue falhou', { ws: ws.id, error: e.message });
     }
   }
 

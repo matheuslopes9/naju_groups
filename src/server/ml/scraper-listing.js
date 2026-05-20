@@ -8,6 +8,9 @@
  */
 import * as cheerio from 'cheerio';
 import { chromium } from 'playwright-core';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('listing');
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
@@ -183,7 +186,7 @@ export async function scrapeUrl(url, method = 'fetch') {
       html = await fetchListingHtml(url);
     } catch (e) {
       if (e.message === 'REQUIRES_PLAYWRIGHT') {
-        console.log(`   🎭 fetch caiu em account-verification, retry via Playwright: ${url.slice(0, 80)}`);
+        log.debug('fetch caiu em account-verification, tentando Playwright', { url: url.slice(0, 80) });
         html = await fetchListingViaPlaywright(url);
       } else {
         throw e;

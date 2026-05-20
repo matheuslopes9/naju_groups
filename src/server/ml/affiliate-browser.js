@@ -17,6 +17,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../db.js';
 import { encrypt, decrypt } from '../crypto.js';
+import { createLogger } from '../logger.js';
+
+const logger = createLogger('shortlink');
 
 const GENERATOR_URL = 'https://www.mercadolivre.com.br/afiliados/linkbuilder';
 const STORAGE_DIR = './auth_state/affiliate';
@@ -199,7 +202,7 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
   const step = async (page, stage, message) => {
     stepCount++;
     const log = `[step ${stepCount}] ${stage}: ${message}`;
-    console.log(`   ${log}`);
+    logger.debug('step', { step: stepCount, stage, message });
     let screenshotName = null;
     if (page) {
       try {
@@ -210,7 +213,7 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
           fullPage: false, // viewport só, mais rápido
         });
       } catch (e) {
-        console.warn(`   ⚠️  screenshot do step falhou: ${e.message}`);
+        logger.debug('screenshot do step falhou', { error: e.message });
       }
     }
     onProgress?.({ stage, message, screenshot: screenshotName, step: stepCount });
@@ -294,7 +297,7 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
           await el.fill(productUrl, { timeout: 5000 });
           filled = true;
           filledLocator = el;
-          console.log(`   ✓ campo preenchido com seletor: ${sel}`);
+          logger.debug('campo preenchido', { selector: sel });
           break;
         }
       } catch {}
@@ -337,7 +340,7 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
         if (count === 0) continue;
         const disabled = await btn.isDisabled().catch(() => false);
         if (disabled) {
-          console.log(`   ⚠️  botão ${sel} está desabilitado — tentando próximo`);
+          logger.debug('botão desabilitado, tentando próximo', { selector: sel });
           continue;
         }
         // Estratégia tripla: scrollIntoView + hover + click forçado
@@ -346,10 +349,10 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
         await page.waitForTimeout(200);
         await btn.click({ timeout: 5000, force: false });
         clickedSel = sel;
-        console.log(`   ✓ botão clicado: ${sel}`);
+        logger.debug('botão clicado', { selector: sel });
         break;
       } catch (e) {
-        console.warn(`   ⚠️  click em ${sel} falhou: ${e.message?.slice(0, 100)}`);
+        logger.debug('click falhou', { selector: sel, error: e.message?.slice(0, 100) });
       }
     }
     if (!clickedSel) throw new Error('Não achei botão "Gerar" habilitado (pode estar disabled por conteúdo inválido)');
@@ -420,10 +423,10 @@ async function _generateShortlinkUnsafe(productUrl, { onProgress } = {}) {
       throw new Error(`Timeout 60s esperando shortlink${hint}`);
     }
     await step(page, 'success', `Shortlink: ${link}`);
-    console.log(`   ✅ shortlink gerado em ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${link}`);
+    logger.info('shortlink gerado', { ms: Date.now() - startedAt, link });
     return link;
   } catch (e) {
-    console.warn(`   ❌ generateShortlink falhou em ${((Date.now() - startedAt) / 1000).toFixed(1)}s: ${e.message}`);
+    logger.warn('generateShortlink falhou', { ms: Date.now() - startedAt, error: e.message });
     throw e;
   } finally {
     if (ctx) await ctx.close();
@@ -445,7 +448,7 @@ async function captureDebug(page, productUrl, sessionTag, browserLogs = []) {
   await fs.writeFile(htmlPath, html);
 
   await page.screenshot({ path: pngPath, fullPage: true }).catch((e) => {
-    console.warn(`   ⚠️  screenshot falhou: ${e.message}`);
+    logger.debug('screenshot final falhou', { error: e.message });
   });
 
   await fs.writeFile(metaPath, JSON.stringify({
@@ -457,7 +460,7 @@ async function captureDebug(page, productUrl, sessionTag, browserLogs = []) {
     browserLogs: browserLogs.slice(-30), // últimos 30 eventos do console do browser
   }, null, 2));
 
-  console.warn(`   📋 Debug final salvo: ${path.basename(htmlPath)}`);
+  logger.info('debug final salvo', { file: path.basename(htmlPath) });
   return { htmlPath, pngPath, metaPath };
 }
 

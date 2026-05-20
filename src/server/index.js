@@ -9,6 +9,9 @@ import { authMiddleware, validateSession, SESSION_COOKIE } from './auth.js';
 import { waManager } from './whatsapp/manager.js';
 import { startCatalogWorker } from './catalog-worker.js';
 import { startSender } from './sender.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('app');
 
 import authRouter from './routes/auth.js';
 import workspacesRouter from './routes/workspaces.js';
@@ -25,7 +28,7 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
-const BUILD_TAG = 'v2.9-incremental-distribute-2026-05-20';
+const BUILD_TAG = 'v3.0-logger-2026-05-20';
 
 // API pública
 app.get('/healthz', (_req, res) => res.json({ ok: true, build: BUILD_TAG }));
@@ -62,8 +65,7 @@ if (fs.existsSync(FRONTEND_DIST)) {
 
 const PORT = Number(process.env.PORT ?? 3000);
 const server = app.listen(PORT, () => {
-  console.log(`🌐 HTTP em http://localhost:${PORT}`);
-  console.log(`📌 AdManager build: ${BUILD_TAG}`);
+  log.info('servidor http iniciado', { port: PORT, build: BUILD_TAG });
 });
 
 // WebSocket: stream de status WhatsApp → conectado autenticado
@@ -102,6 +104,6 @@ function parseCookies(header) {
 }
 
 // Restaura sessões previamente conectadas e inicia workers
-waManager.restoreAll().catch((e) => console.warn('restoreAll:', e.message));
+waManager.restoreAll().catch((e) => log.warn('restoreAll falhou', { error: e.message }));
 startCatalogWorker();
 startSender();

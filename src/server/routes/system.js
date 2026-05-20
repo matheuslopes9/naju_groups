@@ -8,6 +8,9 @@ import { Router } from 'express';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
 import { SOURCE_CATALOG, buildPageUrl } from '../ml/sources-catalog.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('system');
 import { scrapeUrl } from '../ml/scraper-listing.js';
 
 const router = Router();
@@ -105,10 +108,10 @@ router.post('/reset', async (_req, res) => {
     counts.scrapedOffers = q4.count;
 
     audit('system.reset', { entity: 'system', payload: counts });
-    console.log(`🧹 Reset total: ${JSON.stringify(counts)}`);
+    log.info('reset total executado', counts);
     res.json({ ok: true, deleted: counts });
   } catch (e) {
-    console.warn('reset falhou:', e.message);
+    log.warn('reset falhou', { error: e.message });
     res.status(500).json({ error: e.message });
   }
 });

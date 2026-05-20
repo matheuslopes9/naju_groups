@@ -14,14 +14,16 @@ import { waManager } from './whatsapp/manager.js';
 import { generateShortlink, getSessionStatus } from './ml/affiliate-browser.js';
 import { formatOffer } from './formatter.js';
 import { isWithinSendWindow } from './queue.js';
+import { createLogger } from './logger.js';
 
+const log = createLogger('sender');
 const TICK_MS = 30_000;
 const wsCooldown = new Map(); // workspaceId → timestamp until
 
 export function startSender() {
-  setInterval(() => tick().catch((e) => console.warn('sender tick err:', e.message)), TICK_MS);
+  setInterval(() => tick().catch((e) => log.warn('tick falhou', { error: e.message })), TICK_MS);
   setTimeout(tick, 10_000);
-  console.log('📤 Sender daemon iniciado (tick=30s)');
+  log.info('sender daemon iniciado', { tickMs: TICK_MS });
 }
 
 async function tick() {
@@ -157,9 +159,9 @@ async function processOne(ws, queueItem) {
       },
     }).catch(() => {});
 
-    console.log(`📤 [${ws.name}] enviado: ${offer.title.slice(0, 60)}`);
+    log.info('enviado', { ws: ws.name, title: offer.title.slice(0, 60), score: offer.score });
   } catch (e) {
-    console.warn(`❌ sender [${ws.name}] erro:`, e.message);
+    log.warn('envio falhou', { ws: ws.name, error: e.message });
     await markFailed(queueItem.id, e.message);
     bumpCooldown(ws.id);
   }

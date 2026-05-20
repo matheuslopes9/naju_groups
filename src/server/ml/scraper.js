@@ -21,6 +21,9 @@
 import * as cheerio from 'cheerio';
 import { scrapeUrl } from './scraper-listing.js';
 import { SOURCE_CATALOG, findSourceById, buildPageUrl } from './sources-catalog.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('scrape');
 
 const BASE_URL = 'https://www.mercadolivre.com.br';
 
@@ -146,7 +149,6 @@ export async function scrapeSource({ slug = '', maxPages = 1 } = {}, onProgress)
 
 async function scrapePage(url) {
   await delay(500, 1500);
-  console.log(`   🌐 GET ${url}`);
   const ua = pickUA();
   const res = await fetch(url, {
     headers: {
@@ -157,19 +159,18 @@ async function scrapePage(url) {
     },
     redirect: 'follow',
   });
-  console.log(`   ← HTTP ${res.status} ${res.statusText} (final URL: ${res.url})`);
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} (UA: ${ua.slice(0, 50)})`);
   }
   const html = await res.text();
-  console.log(`   📄 HTML size: ${(html.length / 1024).toFixed(0)} KB`);
-
-  // Conta os cards encontrados antes do parser
-  const cardMatches = (html.match(/poly-card poly-card/g) ?? []).length;
-  console.log(`   🃏 poly-card matches no HTML: ${cardMatches}`);
-
   const parsed = parseOffersPage(html);
-  console.log(`   ✂️  Parser extraiu: ${parsed.length} ofertas válidas`);
+  // Tudo num único debug — só aparece com LOG_LEVEL=debug
+  log.debug('page scraped', {
+    url: url.slice(-60),
+    status: res.status,
+    kb: Math.round(html.length / 1024),
+    parsed: parsed.length,
+  });
   return parsed;
 }
 
@@ -180,7 +181,6 @@ function parseOffersPage(html) {
   const reasons = { noTitle: 0, noPermalink: 0, noProductId: 0, dupe: 0, noPrice: 0 };
 
   const cards = $('div.andes-card.poly-card');
-  console.log(`   📦 cheerio encontrou ${cards.length} elementos andes-card.poly-card`);
 
   cards.each((_, el) => {
     const $el = $(el);
@@ -253,8 +253,11 @@ function parseOffersPage(html) {
     });
   });
 
-  const discarded = Object.entries(reasons).filter(([_, v]) => v > 0).map(([k, v]) => `${k}=${v}`).join(' ');
-  if (discarded) console.log(`   🗑️  parser descartou:`, discarded);
+  // Só loga discarded em debug, e só se houver algo significativo
+  const discardedTotal = Object.values(reasons).reduce((a, b) => a + b, 0);
+  if (discardedTotal > 0) {
+    log.trace('parser discartou', { ...reasons, total: discardedTotal, kept: offers.length });
+  }
 
   return offers;
 }

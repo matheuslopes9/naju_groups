@@ -27,6 +27,9 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../db.js';
+import { createLogger } from '../logger.js';
+
+const log = createLogger('wa');
 
 const logger = pino({ level: 'warn' });
 
@@ -49,7 +52,7 @@ class WhatsappManager extends EventEmitter {
     const dir = this.authStatePath(workspaceId);
     try {
       await fs.rm(dir, { recursive: true, force: true });
-      console.log(`   🗑️  credenciais limpas: ${dir}`);
+      log.info('credenciais limpas', { dir });
     } catch (e) {
       // diretório pode nem existir, ignora
     }
@@ -180,13 +183,13 @@ class WhatsappManager extends EventEmitter {
         if (isDeviceRemoved) {
           // Apaga credenciais antigas — elas são inválidas e bloqueiam novo QR
           await this.clearCredentials(workspaceId).catch((e) =>
-            console.warn(`   ⚠️  Falha ao limpar credenciais de ${workspaceId}: ${e.message}`)
+            log.warn('falha ao limpar credenciais', { ws: workspaceId, error: e.message })
           );
           nextStatus = 'disconnected';
-          console.warn(`🔓 [${workspaceId}] Sessão WhatsApp invalidada (device_removed/401). Credenciais apagadas — pronto para novo QR.`);
+          log.warn('sessão invalidada (device_removed/401), credenciais apagadas, pronto pra novo QR', { ws: workspaceId });
         } else if (isConflict) {
           nextStatus = 'conflict';
-          console.warn(`⚠️ [${workspaceId}] WhatsApp em conflito — outro aparelho usando o mesmo número. Não reconectando automaticamente.`);
+          log.warn('em conflito, outro aparelho usando o número, não reconectando', { ws: workspaceId });
         } else {
           // Reconnect com backoff exponencial
           nextStatus = 'connecting';
@@ -204,9 +207,9 @@ class WhatsappManager extends EventEmitter {
         if (willReconnect) {
           const retry = (existing?.retryCount ?? 0) + 1;
           const delayMs = Math.min(60_000, 3000 * Math.pow(2, Math.min(retry - 1, 5)));
-          console.log(`🔄 [${workspaceId}] Reconectando em ${delayMs}ms (tentativa ${retry})`);
+          log.info('reconectando', { ws: workspaceId, inMs: delayMs, tentativa: retry });
           const timer = setTimeout(() => {
-            this.start(workspaceId).catch((e) => console.warn('reconnect failed:', e.message));
+            this.start(workspaceId).catch((e) => log.warn('reconnect falhou', { ws: workspaceId, error: e.message }));
           }, delayMs);
           // Guarda em uma sessão "fantasma" só pra clearable
           this.sessions.set(workspaceId, {
@@ -274,7 +277,7 @@ class WhatsappManager extends EventEmitter {
       where: { workspaceId },
       create: { workspaceId, ...data },
       update: data,
-    }).catch((e) => console.warn('persistStatus failed:', e.message));
+    }).catch((e) => log.warn('persistStatus falhou', { error: e.message }));
   }
 
   async listGroups(workspaceId) {
@@ -325,7 +328,7 @@ class WhatsappManager extends EventEmitter {
     });
     for (const { workspaceId } of sessions) {
       this.start(workspaceId).catch((e) => {
-        console.warn(`Falha restaurando ${workspaceId}:`, e.message);
+        log.warn('falha restaurando sessão', { ws: workspaceId, error: e.message });
       });
     }
   }

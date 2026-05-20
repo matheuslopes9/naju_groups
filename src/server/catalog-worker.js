@@ -22,6 +22,9 @@ import { attachAffiliateTag } from './ml/affiliate.js';
 import { getAffiliateTag } from './ml/oauth.js';
 import { detectCategory, commissionPctFor, estimateCommission } from './ml/commission.js';
 import { enqueueApprovedOffers } from './queue.js';
+import { createLogger, logError } from './logger.js';
+
+const log = createLogger('sweep');
 
 // Slots de varredura em horário de Brasília (UTC-3 fixo, sem DST desde 2019)
 const SLOT_HOURS_BR = [0, 6, 12, 18];
@@ -117,22 +120,22 @@ export function startCatalogWorker() {
   setTimeout(() => {
     const prev = previousSlot();
     if (lastSweepAt < prev.getTime()) {
-      console.log(`🌐 Catch-up: último slot foi ${prev.toISOString()}, varrendo agora`);
-      runCatalogSweep().catch((e) => console.warn('catalog sweep err:', e.message));
+      log.info('catch-up disparando varredura', { lastSlot: prev.toISOString() });
+      runCatalogSweep().catch((e) => logError('sweep', 'catch-up falhou', e));
     }
   }, 60_000);
-  console.log('🌐 Catalog worker iniciado — slots fixos: 00h/06h/12h/18h (Brasília)');
+  log.info('catalog worker iniciado · slots fixos 00h/06h/12h/18h (BRT)');
 }
 
 function scheduleNextSlot() {
   const next = nextSlotAfter();
   const delay = Math.max(1000, next.getTime() - Date.now());
-  console.log(`📅 Próxima varredura agendada: ${next.toISOString()} (em ${Math.round(delay / 60000)} min)`);
+  log.info('próxima varredura agendada', { at: next.toISOString(), inMin: Math.round(delay / 60000) });
   setTimeout(async () => {
     try {
       await runCatalogSweep();
     } catch (e) {
-      console.warn('catalog sweep err:', e.message);
+      logError('sweep', 'varredura falhou', e);
     }
     scheduleNextSlot(); // reagenda pro próximo
   }, delay);
@@ -311,7 +314,7 @@ export async function distributeToWorkspace(ws, opts = {}) {
 
 export async function runCatalogSweep(onProgress) {
   if (sweepInFlight) {
-    console.log('⚠️  Varredura do catálogo já em andamento — ignorando');
+    log.warn('varredura já em andamento, ignorando trigger duplicado');
     return { skipped: 'already-running' };
   }
   sweepInFlight = true;
@@ -322,7 +325,7 @@ export async function runCatalogSweep(onProgress) {
   const emit = (evt) => { emitSweep(evt); onProgress?.(evt); };
 
   try {
-    console.log('\n🌐 Iniciando varredura completa do catálogo (15 fontes)...');
+    log.info('varredura iniciada', { fontes: SOURCE_CATALOG.length });
     emit({ stage: 'start', totalSources: SOURCE_CATALOG.length });
 
     let totalScanned = 0;
@@ -361,15 +364,16 @@ export async function runCatalogSweep(onProgress) {
           emit({ stage: 'page', sourceId: source.id, current: i, total: SOURCE_CATALOG.length, ...p });
         });
       } catch (e) {
-        console.warn(`   ❌ [${source.label}] erro:`, e.message);
+        log.warn('fonte falhou no scrape', { source: source.label, error: e.message });
         emit({ stage: 'source-error', sourceId: source.id, error: e.message });
         continue;
       }
       totalScanned += offers.length;
-      console.log(`   ✅ [${source.label}] ${offers.length} ofertas únicas`);
+      log.info('fonte concluída', { source: source.label, ofertas: offers.length });
 
       // Enriquece + persiste em ScrapedOffer
       let upsertedThisSource = 0;
+      let upsertFails = 0;
       for (const o of offers) {
         const categoryDetected = detectCategory(o.title);
         const commissionPct = commissionPctFor(categoryDetected);
@@ -379,9 +383,11 @@ export async function runCatalogSweep(onProgress) {
           totalUpserted++;
           upsertedThisSource++;
         } catch (e) {
-          console.warn(`      upsert ${o.productId} falhou:`, e.message);
+          upsertFails++;
+          log.debug('upsert falhou', { productId: o.productId, error: e.message });
         }
       }
+      if (upsertFails > 0) log.warn('upserts com falha', { source: source.label, fails: upsertFails });
 
       emit({
         stage: 'source-done',
@@ -401,25 +407,30 @@ export async function runCatalogSweep(onProgress) {
             const stats = await distributeToWorkspace(ws);
             if (stats.saved > 0) {
               totalSavedToOffers += stats.saved;
-              console.log(`   → [${ws.name}] +${stats.saved} ofertas salvas (${stats.passed}/${stats.total} passaram)`);
+              log.info('distribuição', { ws: ws.name, saved: stats.saved, passed: `${stats.passed}/${stats.total}` });
               emit({ stage: 'workspace-distribute', sourceId: source.id, workspace: ws.name, saved: stats.saved, passed: stats.passed, total: stats.total });
             }
 
             const r = await enqueueApprovedOffers(ws, 500);
             if (r.enqueued > 0) {
               totalEnqueued += r.enqueued;
-              console.log(`   📅 [${ws.name}] +${r.enqueued} enfileiradas`);
+              log.info('enfileiramento', { ws: ws.name, enqueued: r.enqueued });
               emit({ stage: 'workspace-enqueue', sourceId: source.id, workspace: ws.name, enqueued: r.enqueued });
             }
           } catch (e) {
-            console.warn(`   ❌ [${ws.name}] distribute incremental falhou:`, e.message);
+            log.warn('distribuição incremental falhou', { ws: ws.name, error: e.message });
             emit({ stage: 'workspace-error', sourceId: source.id, workspace: ws.name, error: e.message });
           }
         }
       }
     }
 
-    console.log(`\n✅ Varredura concluída: ${totalScanned} scaneadas, ${totalUpserted} no banco global, ${totalSavedToOffers} novas em workspaces, ${totalEnqueued} enfileiradas\n`);
+    log.info('varredura concluída', {
+      scanned: totalScanned,
+      upserted: totalUpserted,
+      savedToWs: totalSavedToOffers,
+      enqueued: totalEnqueued,
+    });
     const result = { totalScanned, totalUpserted, totalSaved: totalSavedToOffers, totalEnqueued, workspaces: workspaces.length };
     emit({ stage: 'done', ...result });
     return result;

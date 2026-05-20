@@ -1,4 +1,7 @@
 import { prisma } from './db.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('audit');
 
 /**
  * Log de auditoria — fire and forget, não trava o request.
@@ -16,6 +19,6 @@ export function audit(action, opts = {}) {
       payload: payload ? payload : undefined,
     },
   }).catch((e) => {
-    console.warn('audit.log failed:', e.message);
+    log.warn('audit.log falhou', { error: e.message });
   });
 }
