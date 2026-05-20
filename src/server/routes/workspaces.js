@@ -494,6 +494,7 @@ router.post('/:id/offers/:offerId/approve', async (req, res) => {
     productId: offer.productId,
   }, {
     style: ws?.adStyle ?? 'compact',
+    nicheId: ws?.nichePreset ?? null,
     audience: ws?.audience ?? 'unisex',
   });
 

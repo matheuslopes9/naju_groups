@@ -136,6 +136,7 @@ export async function runAgentForWorkspace(ws) {
         productId: offer.productId,
       }, {
         style: ws.adStyle ?? 'compact',
+        nicheId: ws.nichePreset ?? null,
         audience: ws.audience ?? 'unisex',
       });
 

@@ -1,80 +1,31 @@
+import {
+  pickHook,
+  pickCloser,
+  pickPriceOpener,
+  pickPriceNow,
+  audienceToNicheFallback,
+} from './copy.js';
+
 const brl = (n) =>
   n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-/**
- * Pick aleatório com seed pseudo-aleatório por productId pra evitar repetição
- * de templates pra mesma oferta (idempotente).
- */
-function pickFrom(arr, seed = '') {
-  if (!arr || arr.length === 0) return '';
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-  const idx = Math.abs(hash + Math.floor(Math.random() * 100)) % arr.length;
-  return arr[idx];
+function resolveNiche(opts, offer) {
+  return (
+    opts.nicheId ??
+    offer.nicheId ??
+    audienceToNicheFallback(opts.audience ?? offer.audience ?? 'unisex')
+  );
 }
-
-/**
- * Frases de conexão (chamadas no início do anúncio).
- * Variam conforme audience pra não soar genérico.
- */
-const HOOKS = {
-  female: [
-    'MAIS UM 💅', 'OLHA QUE LUXO 💖', 'CORRE QUE É IMPERDÍVEL 🏃‍♀️',
-    'TÔ DOIDA POR ISSO 😍', 'NÃO DEIXA ESCAPAR 💸', 'PRA VOCÊ SE AMAR MAIS 💕',
-    'GASTE COM VOCÊ 💝', 'INVISTA EM VOCÊ ✨', 'PROMOÇÃO IRRESISTÍVEL 🔥',
-  ],
-  male: [
-    'MAIS UM 👊', 'TÔ VENDO QUE TÁ BOM 🤝', 'PEGA ENQUANTO TÁ 🎯',
-    'CORRE QUE É IMPERDÍVEL 🏃', 'GASTOU CERTO 💸', 'NÃO PERDE TEMPO ⏱️',
-    'PROMOÇÃO RELÂMPAGO ⚡', 'NA REAL VALE A PENA 👀',
-  ],
-  unisex: [
-    'MAIS UM 👇', 'OLHA SÓ ESSA 👀', 'CORRE QUE É IMPERDÍVEL 🏃',
-    'PROMOÇÃO RELÂMPAGO ⚡', 'NÃO DEIXA ESCAPAR 💸', 'OFERTA QUENTE 🔥',
-    'PEGA ENQUANTO TÁ NESSE PREÇO 🎯', 'BAIXOU MUITO 📉',
-  ],
-};
-
-/**
- * Variações da linha de preço — adiciona personalidade.
- */
-const PRICE_OPENERS = ['De', '~De~', 'Era', 'Saiu de'];
-const PRICE_NOW = ['por', 'agora por', 'só', 'apenas', 'sai por'];
-
-/**
- * Closers — frases de chamada à ação ou conexão.
- */
-const CLOSERS = {
-  female: [
-    'Aproveite enquanto tem 💕',
-    'Você merece! ✨',
-    'Garanta o seu antes que acabe 💖',
-    'Promoção tem hora 🕐',
-  ],
-  male: [
-    'Aproveita que tá bom 👌',
-    'Foi mal demorar pra avisar 😅',
-    'Vai escapar? 👀',
-    'Garante logo 🎯',
-  ],
-  unisex: [
-    'Aproveite enquanto dura ⏰',
-    'Não fica pra amanhã 🚀',
-    'Compra esperta 💡',
-    'Garanta antes de subir 📈',
-  ],
-};
 
 /**
  * Estilo COMPACTO: foco no benefício, frase curta, fácil de scanear.
  * Imagem da oferta vai como anexo separado no WhatsApp.
  */
-function formatCompact(offer, audience = 'unisex') {
-  const seed = offer.productId ?? offer.title ?? '';
-  const hook = pickFrom(HOOKS[audience] ?? HOOKS.unisex, seed);
-  const opener = pickFrom(PRICE_OPENERS, seed + 'o');
-  const now = pickFrom(PRICE_NOW, seed + 'n');
-  const closer = pickFrom(CLOSERS[audience] ?? CLOSERS.unisex, seed + 'c');
+function formatCompact(offer, nicheId) {
+  const hook = pickHook(offer, nicheId);
+  const opener = pickPriceOpener(offer);
+  const now = pickPriceNow(offer);
+  const closer = pickCloser(offer, nicheId);
 
   const lines = [];
   lines.push(hook);
@@ -102,10 +53,9 @@ function formatCompact(offer, audience = 'unisex') {
 /**
  * Estilo RICH: mais elaborado, com bullets, urgência e social proof.
  */
-function formatRich(offer, audience = 'unisex') {
-  const seed = offer.productId ?? offer.title ?? '';
-  const hook = pickFrom(HOOKS[audience] ?? HOOKS.unisex, seed);
-  const closer = pickFrom(CLOSERS[audience] ?? CLOSERS.unisex, seed + 'c');
+function formatRich(offer, nicheId) {
+  const hook = pickHook(offer, nicheId);
+  const closer = pickCloser(offer, nicheId);
 
   const benefits = [];
   if (offer.freeShipping) benefits.push('🚚 *Frete grátis*');
@@ -142,7 +92,7 @@ function formatRich(offer, audience = 'unisex') {
 
 export function formatOffer(offer, opts = {}) {
   const style = opts.style ?? offer.adStyle ?? 'compact';
-  const audience = opts.audience ?? offer.audience ?? 'unisex';
-  if (style === 'rich') return formatRich(offer, audience);
-  return formatCompact(offer, audience);
+  const nicheId = resolveNiche(opts, offer);
+  if (style === 'rich') return formatRich(offer, nicheId);
+  return formatCompact(offer, nicheId);
 }
