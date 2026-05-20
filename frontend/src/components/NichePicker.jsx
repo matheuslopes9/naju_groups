@@ -1,64 +1,177 @@
 /**
- * Dropdown de nichos pré-cadastrados.
- * Quando o usuário escolhe um nicho, aplica via API (preenche keywords + audience).
+ * NichePicker — multi-select de nichos com 1 marcado como PRINCIPAL.
+ *
+ * Comportamento:
+ *   - Clique no chip → adiciona/remove da seleção
+ *   - Clique na estrela do chip → promove ele a principal
+ *   - Principal decide o TOM da copy (hooks/closers).
+ *   - Extras (não-principais) só agregam keywords.
+ *
+ * Salva no backend via POST /apply-niche { primary, extras[] }
+ * que cuida de unir keywords sem duplicar.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
 import { Icon } from './Icon.jsx';
 
 export default function NichePicker({ ws, reload }) {
   const [niches, setNiches] = useState([]);
-  const [applying, setApplying] = useState(false);
+  const [primary, setPrimary] = useState(ws.nichePreset ?? '');
+  const [extras, setExtras] = useState(() => new Set(
+    (ws.extraNiches ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  ));
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
+  useEffect(() => { api.availableNiches().then(setNiches).catch(() => {}); }, []);
+
+  // Reseta o estado local quando ws muda (ex: troca de workspace)
   useEffect(() => {
-    api.availableNiches().then(setNiches).catch(() => {});
-  }, []);
+    setPrimary(ws.nichePreset ?? '');
+    setExtras(new Set((ws.extraNiches ?? '').split(',').map((s) => s.trim()).filter(Boolean)));
+    setDirty(false);
+  }, [ws.id, ws.nichePreset, ws.extraNiches]);
 
-  async function apply(nicheId) {
-    if (!nicheId) return;
-    if (ws.keywords && ws.keywords.length > 0 &&
-        !confirm('Aplicar este nicho vai SOBRESCREVER suas keywords atuais. Continuar?')) {
-      return;
+  const selectedCount = (primary ? 1 : 0) + extras.size;
+
+  function toggle(id) {
+    if (id === primary) {
+      // desmarcar o principal: promove o primeiro extra a principal (se houver)
+      const next = new Set(extras);
+      const newPrimary = next.values().next().value ?? '';
+      next.delete(newPrimary);
+      setPrimary(newPrimary);
+      setExtras(next);
+    } else if (extras.has(id)) {
+      const next = new Set(extras);
+      next.delete(id);
+      setExtras(next);
+    } else if (!primary) {
+      setPrimary(id);
+    } else {
+      const next = new Set(extras);
+      next.add(id);
+      setExtras(next);
     }
-    setApplying(true);
-    try {
-      await api.applyNiche(ws.id, nicheId);
-      toast.success('Nicho aplicado — keywords atualizadas');
-      reload();
-    } catch (e) { toast.error(e.message); }
-    finally { setApplying(false); }
+    setDirty(true);
   }
 
-  const current = niches.find((n) => n.id === ws.nichePreset);
+  function setPrincipal(id) {
+    if (id === primary) return;
+    // se id estava em extras, remove; o antigo primary vai pra extras
+    const next = new Set(extras);
+    next.delete(id);
+    if (primary) next.add(primary);
+    setPrimary(id);
+    setExtras(next);
+    setDirty(true);
+  }
+
+  async function save() {
+    if (!primary) return toast.error('Escolha pelo menos um nicho principal');
+    const hadKeywords = (ws.keywords ?? '').length > 0;
+    if (hadKeywords && !confirm('Aplicar vai SOBRESCREVER suas keywords atuais com a união dos nichos selecionados. Continuar?')) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.applyNiches(ws.id, primary, Array.from(extras));
+      toast.success(`Nicho principal: ${primary} · +${extras.size} extras`);
+      setDirty(false);
+      reload();
+    } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
+  }
+
+  const byAudience = useMemo(() => {
+    const map = { female: [], male: [], unisex: [] };
+    for (const n of niches) {
+      const a = n.audience ?? 'unisex';
+      (map[a] ?? map.unisex).push(n);
+    }
+    return map;
+  }, [niches]);
 
   return (
-    <div className="space-y-2">
-      <select
-        value={ws.nichePreset ?? ''}
-        onChange={(e) => apply(e.target.value)}
-        disabled={applying}
-        className="input"
-      >
-        <option value="" disabled>Escolha um nicho…</option>
-        {niches.map((n) => (
-          <option key={n.id} value={n.id}>
-            {n.label} ({n.audience === 'female' ? 'Feminino' : n.audience === 'male' ? 'Masculino' : 'Unissex'})
-          </option>
-        ))}
-      </select>
-      {current && (
-        <div className="text-xs px-3 py-2 rounded-lg flex items-start gap-2"
-             style={{ background: 'rgba(99,102,241,0.08)', color: 'rgb(129,140,248)' }}>
-          <Icon.Check width={14} height={14} className="mt-0.5 shrink-0" />
-          <div>
-            <div className="font-medium">{current.label}</div>
-            <div className="text-[10px] opacity-70 mt-0.5 line-clamp-2">
-              {current.keywords.slice(0, 200) || '(sem keywords — aceita tudo)'}
+    <div className="space-y-3">
+      {(['female', 'male', 'unisex']).map((aud) => {
+        const list = byAudience[aud];
+        if (!list || list.length === 0) return null;
+        return (
+          <div key={aud}>
+            <div className="text-[10px] uppercase tracking-wider font-semibold opacity-60 mb-1.5">
+              {aud === 'female' ? '👩 Feminino' : aud === 'male' ? '👨 Masculino' : '👤 Unissex'}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {list.map((n) => {
+                const isPrimary = n.id === primary;
+                const isExtra = extras.has(n.id);
+                const isSelected = isPrimary || isExtra;
+                return (
+                  <div
+                    key={n.id}
+                    className={`flex items-center rounded-md border transition ${
+                      isPrimary
+                        ? 'bg-gradient-brand text-white border-transparent'
+                        : isExtra
+                          ? 'bg-indigo-500/15 border-indigo-500/40'
+                          : ''
+                    }`}
+                    style={!isSelected ? { borderColor: 'rgb(var(--border-strong))', color: 'rgb(var(--text-muted))' } : {}}
+                  >
+                    {isSelected && (
+                      <button
+                        type="button"
+                        onClick={() => setPrincipal(n.id)}
+                        title={isPrimary ? 'Já é o principal' : 'Tornar este o nicho principal (decide o tom das mensagens)'}
+                        className={`pl-2 pr-0.5 py-1 hover:opacity-80 ${isPrimary ? 'cursor-default' : 'cursor-pointer'}`}
+                      >
+                        {isPrimary ? '⭐' : '☆'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => toggle(n.id)}
+                      className="text-[11px] px-2 py-1 flex items-center gap-1"
+                    >
+                      {n.label}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
+        );
+      })}
+
+      <div className="flex items-center justify-between pt-2 border-t border-slate-700/40">
+        <div className="text-xs opacity-70">
+          {selectedCount === 0 ? (
+            'Nenhum nicho selecionado'
+          ) : (
+            <>
+              <strong>{selectedCount}</strong> nicho{selectedCount > 1 ? 's' : ''} selecionado{selectedCount > 1 ? 's' : ''}.{' '}
+              {primary && (
+                <>Principal: <strong className="text-indigo-300">⭐ {niches.find((n) => n.id === primary)?.label ?? primary}</strong></>
+              )}
+            </>
+          )}
         </div>
-      )}
+        <button
+          onClick={save}
+          disabled={saving || !primary || !dirty}
+          className="btn btn-primary !text-xs"
+        >
+          {saving ? <Icon.Loader width={12} height={12} /> : <Icon.Check width={12} height={12} />}
+          {saving ? 'Salvando…' : dirty ? 'Aplicar' : 'Salvo'}
+        </button>
+      </div>
+
+      <p className="text-[10px] opacity-50 leading-relaxed">
+        💡 O <strong>principal</strong> (⭐) decide o tom das mensagens. Os extras só somam keywords.
+        Útil pra workspace híbrido (ex: Beauty + Moda Feminina + Bebês → mensagens com tom feminino-beauty).
+      </p>
     </div>
   );
 }

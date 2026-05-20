@@ -24,9 +24,13 @@ model Workspace {
   priceMin     Float?   @map("price_min")
   priceMax     Float?   @map("price_max")
   cooldownDays Int      @default(30) @map("cooldown_days")
-  // Nicho + público (preset escolhido pelo usuário)
+  // Nicho principal (decide o TOM da copy — hooks/closers de copy.js)
   nichePreset  String? @map("niche_preset") // ex: 'beauty-f', 'tech', 'fitness-m'
-  audience     String? // 'female', 'male', 'unisex' (derivado do nicho)
+  // Nichos extras (CSV) — só agregam keywords, NÃO afetam o tom da copy.
+  // Permite workspace híbrido (ex: Beauty-F + Fashion-F + Babies) mantendo
+  // mensagens consistentes no tom feminino-beauty.
+  extraNiches  String? @map("extra_niches")
+  audience     String? // 'female', 'male', 'unisex' (derivado do nicho principal)
   adStyle      String  @default("compact") @map("ad_style") // 'compact' ou 'rich'
   typingSimulation Boolean @default(true) @map("typing_simulation")
   // Auto-aprovação (agente IA)

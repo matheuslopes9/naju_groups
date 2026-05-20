@@ -64,7 +64,9 @@ export const api = {
 
   // Nichos pré-cadastrados
   availableNiches: () => request('/api/workspaces/ml/niches'),
-  applyNiche: (id, nicheId) => request(`/api/workspaces/${id}/apply-niche`, { method: 'POST', body: JSON.stringify({ nicheId }) }),
+  applyNiches: (id, primary, extras = []) => request(`/api/workspaces/${id}/apply-niche`, { method: 'POST', body: JSON.stringify({ primary, extras }) }),
+  // Compat com chamadas antigas
+  applyNiche: (id, nicheId) => request(`/api/workspaces/${id}/apply-niche`, { method: 'POST', body: JSON.stringify({ primary: nicheId }) }),
 
   // Catálogo global de fontes (15 URLs validadas)
   listCatalog: () => request('/api/workspaces/ml/catalog'),

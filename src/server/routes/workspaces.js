@@ -134,7 +134,7 @@ router.patch('/:id', async (req, res) => {
     'minDiscount', 'onlyFreeShipping', 'onlyDeals',
     'keywords', 'priceMin', 'priceMax', 'cooldownDays',
     'autoApproveEnabled', 'autoApproveThreshold', 'autoApproveMaxDaily',
-    'nichePreset', 'audience', 'adStyle', 'typingSimulation',
+    'nichePreset', 'extraNiches', 'audience', 'adStyle', 'typingSimulation',
     'sendWindowStart', 'sendWindowEnd', 'queueIntervalMin',
   ];
   const data = {};
@@ -281,22 +281,51 @@ router.get('/ml/niches', async (_req, res) => {
   res.json(NICHE_PRESETS);
 });
 
-// Aplica um preset de nicho ao workspace: copia keywords + audience
+// Aplica preset de nicho(s) ao workspace.
+// Body: { primary: 'beauty-f', extras: ['fashion-f', 'babies'] }
+//   - primary: nicho que decide o TOM da copy (hooks/closers)
+//   - extras: nichos adicionais cujas keywords são agregadas
+// Keywords finais = união (dedup) das keywords do primary + extras.
+// Audience é herdada do primary.
+//
+// Compat com chamadas antigas { nicheId: 'beauty-f' } — trata como primary
+// sem extras.
 router.post('/:id/apply-niche', async (req, res) => {
-  const { nicheId } = req.body ?? {};
-  const niche = findNiche(nicheId);
-  if (!niche) return res.status(400).json({ error: 'nicho desconhecido' });
+  const b = req.body ?? {};
+  const primaryId = b.primary ?? b.nicheId;
+  const extras = Array.isArray(b.extras) ? b.extras : [];
+
+  const primary = findNiche(primaryId);
+  if (!primary) return res.status(400).json({ error: 'nicho principal desconhecido' });
+
+  const extraNiches = extras
+    .map((id) => findNiche(id))
+    .filter((n) => n && n.id !== primary.id);
+
+  // União de keywords (case-insensitive dedup, mantém ordem do primary primeiro)
+  const seen = new Set();
+  const kws = [];
+  for (const n of [primary, ...extraNiches]) {
+    for (const k of (n.keywords ?? '').split(',').map((s) => s.trim()).filter(Boolean)) {
+      const low = k.toLowerCase();
+      if (seen.has(low)) continue;
+      seen.add(low);
+      kws.push(k);
+    }
+  }
+
   const updated = await prisma.workspace.update({
     where: { id: req.params.id },
     data: {
-      nichePreset: niche.id,
-      audience: niche.audience,
-      keywords: niche.keywords,
+      nichePreset: primary.id,
+      extraNiches: extraNiches.length > 0 ? extraNiches.map((n) => n.id).join(',') : null,
+      audience: primary.audience,
+      keywords: kws.join(', '),
     },
   });
   audit('workspace.niche_applied', {
     entity: 'workspace', entityId: req.params.id, workspaceId: req.params.id,
-    payload: { nicheId: niche.id, label: niche.label },
+    payload: { primary: primary.id, extras: extraNiches.map((n) => n.id) },
   });
   res.json(updated);
 });
