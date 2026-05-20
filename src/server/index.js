@@ -24,7 +24,7 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
-const BUILD_TAG = 'v2.0-score-funnel-2026-05-20';
+const BUILD_TAG = 'v2.1-config-save-all-2026-05-20';
 
 // API pública
 app.get('/healthz', (_req, res) => res.json({ ok: true, build: BUILD_TAG }));

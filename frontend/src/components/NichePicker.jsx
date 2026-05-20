@@ -7,70 +7,89 @@
  *   - Principal decide o TOM da copy (hooks/closers).
  *   - Extras (não-principais) só agregam keywords.
  *
- * Salva no backend via POST /apply-niche { primary, extras[] }
- * que cuida de unir keywords sem duplicar.
+ * Modos:
+ *   - Standalone (padrão): salva via POST /apply-niche com botão "Aplicar"
+ *     próprio. Usado no QuickStartPanel.
+ *   - Controlado (value + onChange): não salva sozinho, expõe o estado pro
+ *     pai. Usado no ConfigPanel com "Salvar tudo" único.
+ *
+ * Props controlado:
+ *   - value: { primary, extras: string[] }
+ *   - onChange: (next) => void
  */
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
 import { Icon } from './Icon.jsx';
 
-export default function NichePicker({ ws, reload }) {
+export default function NichePicker({ ws, reload, value, onChange }) {
+  const controlled = !!value && typeof onChange === 'function';
+
   const [niches, setNiches] = useState([]);
-  const [primary, setPrimary] = useState(ws.nichePreset ?? '');
-  const [extras, setExtras] = useState(() => new Set(
-    (ws.extraNiches ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  // Estado interno só usado no modo standalone
+  const [internalPrimary, setInternalPrimary] = useState(ws?.nichePreset ?? '');
+  const [internalExtras, setInternalExtras] = useState(() => new Set(
+    (ws?.extraNiches ?? '').split(',').map((s) => s.trim()).filter(Boolean),
   ));
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => { api.availableNiches().then(setNiches).catch(() => {}); }, []);
 
-  // Reseta o estado local quando ws muda (ex: troca de workspace)
+  // Reseta o estado interno quando ws muda (modo standalone)
   useEffect(() => {
-    setPrimary(ws.nichePreset ?? '');
-    setExtras(new Set((ws.extraNiches ?? '').split(',').map((s) => s.trim()).filter(Boolean)));
+    if (controlled) return;
+    setInternalPrimary(ws?.nichePreset ?? '');
+    setInternalExtras(new Set((ws?.extraNiches ?? '').split(',').map((s) => s.trim()).filter(Boolean)));
     setDirty(false);
-  }, [ws.id, ws.nichePreset, ws.extraNiches]);
+  }, [controlled, ws?.id, ws?.nichePreset, ws?.extraNiches]);
 
+  // Resolve primary/extras a partir do modo
+  const primary = controlled ? (value.primary ?? '') : internalPrimary;
+  const extrasArr = controlled ? (value.extras ?? []) : Array.from(internalExtras);
+  const extras = useMemo(() => new Set(extrasArr), [extrasArr.join(',')]);
   const selectedCount = (primary ? 1 : 0) + extras.size;
+
+  function applyState(nextPrimary, nextExtras) {
+    if (controlled) {
+      onChange({ primary: nextPrimary, extras: Array.from(nextExtras) });
+    } else {
+      setInternalPrimary(nextPrimary);
+      setInternalExtras(nextExtras);
+      setDirty(true);
+    }
+  }
 
   function toggle(id) {
     if (id === primary) {
-      // desmarcar o principal: promove o primeiro extra a principal (se houver)
       const next = new Set(extras);
       const newPrimary = next.values().next().value ?? '';
       next.delete(newPrimary);
-      setPrimary(newPrimary);
-      setExtras(next);
+      applyState(newPrimary, next);
     } else if (extras.has(id)) {
       const next = new Set(extras);
       next.delete(id);
-      setExtras(next);
+      applyState(primary, next);
     } else if (!primary) {
-      setPrimary(id);
+      applyState(id, extras);
     } else {
       const next = new Set(extras);
       next.add(id);
-      setExtras(next);
+      applyState(primary, next);
     }
-    setDirty(true);
   }
 
   function setPrincipal(id) {
     if (id === primary) return;
-    // se id estava em extras, remove; o antigo primary vai pra extras
     const next = new Set(extras);
     next.delete(id);
     if (primary) next.add(primary);
-    setPrimary(id);
-    setExtras(next);
-    setDirty(true);
+    applyState(id, next);
   }
 
   async function save() {
     if (!primary) return toast.error('Escolha pelo menos um nicho principal');
-    const hadKeywords = (ws.keywords ?? '').length > 0;
+    const hadKeywords = (ws?.keywords ?? '').length > 0;
     if (hadKeywords && !confirm('Aplicar vai SOBRESCREVER suas keywords atuais com a união dos nichos selecionados. Continuar?')) {
       return;
     }
@@ -79,7 +98,7 @@ export default function NichePicker({ ws, reload }) {
       await api.applyNiches(ws.id, primary, Array.from(extras));
       toast.success(`Nicho principal: ${primary} · +${extras.size} extras`);
       setDirty(false);
-      reload();
+      reload?.();
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
   }
@@ -158,14 +177,16 @@ export default function NichePicker({ ws, reload }) {
             </>
           )}
         </div>
-        <button
-          onClick={save}
-          disabled={saving || !primary || !dirty}
-          className="btn btn-primary !text-xs"
-        >
-          {saving ? <Icon.Loader width={12} height={12} /> : <Icon.Check width={12} height={12} />}
-          {saving ? 'Salvando…' : dirty ? 'Aplicar' : 'Salvo'}
-        </button>
+        {!controlled && (
+          <button
+            onClick={save}
+            disabled={saving || !primary || !dirty}
+            className="btn btn-primary !text-xs"
+          >
+            {saving ? <Icon.Loader width={12} height={12} /> : <Icon.Check width={12} height={12} />}
+            {saving ? 'Salvando…' : dirty ? 'Aplicar' : 'Salvo'}
+          </button>
+        )}
       </div>
 
       <p className="text-[10px] opacity-50 leading-relaxed">
