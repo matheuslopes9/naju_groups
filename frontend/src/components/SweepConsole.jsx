@@ -244,6 +244,11 @@ function formatEvent(evt) {
         color: 'text-cyan-400 font-semibold',
         text: `▶ INICIANDO varredura — ${evt.totalSources} fontes do catálogo`,
       };
+    case 'workspaces-loaded':
+      return {
+        color: 'text-indigo-300',
+        text: `🤖 ${evt.count} workspace(s) com bot ativo: ${(evt.names || []).join(', ')}`,
+      };
     case 'source-start':
       return {
         color: 'text-cyan-300',

@@ -327,9 +327,21 @@ export async function runCatalogSweep(onProgress) {
 
     let totalScanned = 0;
     let totalUpserted = 0;
+    let totalSavedToOffers = 0;
+    let totalEnqueued = 0;
     let i = 0;
 
-    // Etapa 1: scrape de cada fonte → upsert em ScrapedOffer
+    // Carrega lista de workspaces ativos UMA vez no início.
+    // A cada fonte, vai re-distribuir incrementalmente — assim ofertas chegam
+    // no inbox/fila durante a varredura, não só no final.
+    const workspaces = await prisma.workspace.findMany({
+      where: { autoApproveEnabled: true },
+    });
+    if (workspaces.length > 0) {
+      emit({ stage: 'workspaces-loaded', count: workspaces.length, names: workspaces.map((w) => w.name) });
+    }
+
+    // Etapa unificada: scrape fonte → upsert em ScrapedOffer → distribui+enfileira
     for (const source of SOURCE_CATALOG) {
       i++;
       const maxPages = Number(process.env.CATALOG_MAX_PAGES ?? source.pages);
@@ -357,6 +369,7 @@ export async function runCatalogSweep(onProgress) {
       console.log(`   ✅ [${source.label}] ${offers.length} ofertas únicas`);
 
       // Enriquece + persiste em ScrapedOffer
+      let upsertedThisSource = 0;
       for (const o of offers) {
         const categoryDetected = detectCategory(o.title);
         const commissionPct = commissionPctFor(categoryDetected);
@@ -364,6 +377,7 @@ export async function runCatalogSweep(onProgress) {
         try {
           await upsertScrapedOffer({ ...o, categoryDetected, commissionPct, estimatedCommission }, source.id);
           totalUpserted++;
+          upsertedThisSource++;
         } catch (e) {
           console.warn(`      upsert ${o.productId} falhou:`, e.message);
         }
@@ -375,33 +389,33 @@ export async function runCatalogSweep(onProgress) {
         current: i,
         total: SOURCE_CATALOG.length,
         scanned: offers.length,
+        upserted: upsertedThisSource,
       });
-    }
 
-    // Etapa 2: distribui pros workspaces ativos
-    const workspaces = await prisma.workspace.findMany({
-      where: { autoApproveEnabled: true },
-    });
-    let totalSavedToOffers = 0;
-    let totalEnqueued = 0;
-    for (const ws of workspaces) {
-      try {
-        const stats = await distributeToWorkspace(ws);
-        totalSavedToOffers += stats.saved;
-        if (stats.saved > 0) {
-          console.log(`   → [${ws.name}] +${stats.saved} ofertas salvas (${stats.passed} passaram filtros de ${stats.total})`);
-          emit({ stage: 'workspace-distribute', workspace: ws.name, saved: stats.saved, passed: stats.passed, total: stats.total });
-        }
+      // INCREMENTAL: a cada fonte concluída, distribui pros workspaces ativos.
+      // Garante que ofertas chegam no inbox/fila ao longo da varredura, não só
+      // no final (que pode demorar 10-15min com Playwright pesado).
+      if (workspaces.length > 0 && upsertedThisSource > 0) {
+        for (const ws of workspaces) {
+          try {
+            const stats = await distributeToWorkspace(ws);
+            if (stats.saved > 0) {
+              totalSavedToOffers += stats.saved;
+              console.log(`   → [${ws.name}] +${stats.saved} ofertas salvas (${stats.passed}/${stats.total} passaram)`);
+              emit({ stage: 'workspace-distribute', sourceId: source.id, workspace: ws.name, saved: stats.saved, passed: stats.passed, total: stats.total });
+            }
 
-        const r = await enqueueApprovedOffers(ws, 500);
-        totalEnqueued += r.enqueued;
-        if (r.enqueued > 0) {
-          console.log(`   📅 [${ws.name}] ${r.enqueued} enfileiradas`);
-          emit({ stage: 'workspace-enqueue', workspace: ws.name, enqueued: r.enqueued });
+            const r = await enqueueApprovedOffers(ws, 500);
+            if (r.enqueued > 0) {
+              totalEnqueued += r.enqueued;
+              console.log(`   📅 [${ws.name}] +${r.enqueued} enfileiradas`);
+              emit({ stage: 'workspace-enqueue', sourceId: source.id, workspace: ws.name, enqueued: r.enqueued });
+            }
+          } catch (e) {
+            console.warn(`   ❌ [${ws.name}] distribute incremental falhou:`, e.message);
+            emit({ stage: 'workspace-error', sourceId: source.id, workspace: ws.name, error: e.message });
+          }
         }
-      } catch (e) {
-        console.warn(`   ❌ [${ws.name}] distribute falhou:`, e.message);
-        emit({ stage: 'workspace-error', workspace: ws.name, error: e.message });
       }
     }
 
