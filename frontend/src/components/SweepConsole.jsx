@@ -56,8 +56,12 @@ export default function SweepConsole({ onTrigger }) {
   }, [lines, autoScroll]);
 
   function pushLine(evt) {
+    // _ts vem do servidor (carimbado em emitSweep) — usa pra refletir ordem
+    // cronológica real do evento, não o momento em que chegou no browser.
+    // Fallback pra Date.now() pra eventos client-side (connecting/error).
+    const ts = evt._ts ? new Date(evt._ts) : new Date();
     setLines((prev) => {
-      const next = [...prev, { ts: new Date(), evt }];
+      const next = [...prev, { ts, evt }];
       if (next.length > MAX_LINES) next.splice(0, next.length - MAX_LINES);
       return next;
     });
@@ -246,7 +250,7 @@ function formatEvent(evt) {
         text: `[${evt.current}/${evt.total}] 🌐 ${evt.label} (até ${evt.maxPages} págs)`,
       };
     case 'page': {
-      // O 'page' do scrapeCatalogSource pode ter found, added, error, stopped
+      // O 'page' do scrapeCatalogSource pode ter found, added, error, stopped, phase
       if (evt.error) {
         return {
           color: 'text-rose-400',
@@ -254,16 +258,25 @@ function formatEvent(evt) {
         };
       }
       if (evt.stopped) {
+        const motivo = evt.stopped === 'empty-page' ? 'sem mais ofertas'
+                     : evt.stopped === 'all-duplicates' ? `paginação quebrada (${evt.reason ?? 'todas duplicadas'})`
+                     : 'falhas consecutivas';
         return {
           color: 'text-amber-400',
-          text: `   └ parou em pg ${evt.page ?? '?'}: ${evt.stopped === 'empty-page' ? 'sem mais ofertas' : 'falhas consecutivas'}`,
+          text: `   └ parou em pg ${evt.page ?? '?'}: ${motivo}`,
+        };
+      }
+      if (evt.phase === 'fetching') {
+        return {
+          color: 'text-slate-500',
+          text: `   ↻ pg ${evt.page}${evt.totalPages ? `/${evt.totalPages}` : ''} — buscando…`,
         };
       }
       const parts = [`pg ${evt.page}${evt.totalPages ? `/${evt.totalPages}` : ''}`];
       if (evt.found != null) parts.push(`${evt.found} achados`);
-      if (evt.added != null && evt.added !== evt.found) parts.push(`+${evt.added} novos`);
+      if (evt.added != null) parts.push(`+${evt.added} novos`);
       return {
-        color: 'text-slate-400',
+        color: evt.added === 0 && evt.found > 0 ? 'text-amber-400' : 'text-slate-300',
         text: `   └ ${parts.join(' · ')}`,
       };
     }

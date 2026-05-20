@@ -162,14 +162,45 @@ export function findSourceById(id) {
   return SOURCE_CATALOG.find((s) => s.id === id);
 }
 
+// 48 itens por página em listagens lista.mercadolivre.com.br (padrão ML)
+const ITEMS_PER_LIST_PAGE = 48;
+
 /**
- * Constrói a URL paginada de uma fonte.
- * Para 'fetch': adiciona ?page= ou &page= dependendo se já tem query.
- * Para 'playwright': mesma lógica — URL paginação no ML usa &page=N nas /ofertas
- * e _Desde_N nas /lista (mas vamos usar a query padronizada).
+ * Constrói a URL paginada de uma fonte. Formatos do ML:
+ *
+ *   mercadolivre.com.br/ofertas              → ?page=N
+ *   mercadolivre.com.br/ofertas?container=X  → &page=N
+ *   lista.mercadolivre.com.br/path           → /path_Desde_<offset+1>
+ *   lista.mercadolivre.com.br/path_NoIndex_True
+ *                                            → /path_Desde_<offset+1>_NoIndex_True
+ *
+ * Onde offset = (page-1) * 48 (cada página tem 48 itens).
+ *
+ * IMPORTANTE: o ML NÃO suporta ?page=N em /lista/... Tentar isso devolve
+ * sempre a página 1, causando bug onde todas as 42 "páginas" trazem os
+ * mesmos 41 produtos (descoberto via teste em prod 2026-05-20).
  */
 export function buildPageUrl(source, page) {
   if (page <= 1) return source.url;
-  const sep = source.url.includes('?') ? '&' : '?';
-  return `${source.url}${sep}page=${page}`;
+
+  const url = source.url;
+  const isListing = url.includes('lista.mercadolivre.com.br/');
+  const offset = (page - 1) * ITEMS_PER_LIST_PAGE + 1; // 1-based
+
+  if (isListing) {
+    // Insere _Desde_N antes de _NoIndex_True se existir, senão no fim do path
+    // (mas antes de ? se houver query, e antes de # fragment)
+    const [pathPart, queryPart] = url.split('?');
+    let newPath;
+    if (pathPart.includes('_NoIndex_True')) {
+      newPath = pathPart.replace('_NoIndex_True', `_Desde_${offset}_NoIndex_True`);
+    } else {
+      newPath = `${pathPart}_Desde_${offset}`;
+    }
+    return queryPart ? `${newPath}?${queryPart}` : newPath;
+  }
+
+  // /ofertas e variantes — usa query
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}page=${page}`;
 }

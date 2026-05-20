@@ -84,6 +84,8 @@ export async function scrapeCatalogSource(sourceId, maxPages, onProgress) {
   for (let page = 1; page <= pages; page++) {
     if (page > 1) await delay(1500, 3000);
     const url = buildPageUrl(source, page);
+    // Emite ANTES da request — UI mostra "indo pra pg X" enquanto roda
+    if (onProgress) onProgress({ sourceId, page, totalPages: pages, phase: 'fetching', url });
     try {
       const offers = await scrapeUrl(url, source.method);
       let added = 0;
@@ -94,10 +96,16 @@ export async function scrapeCatalogSource(sourceId, maxPages, onProgress) {
         added++;
       }
       consecutiveFails = 0;
-      if (onProgress) onProgress({ sourceId, page, totalPages: pages, found: offers.length, added });
+      if (onProgress) onProgress({ sourceId, page, totalPages: pages, found: offers.length, added, phase: 'done' });
       // Página vazia = chegou no fim, aborta loop
       if (offers.length === 0) {
         if (onProgress) onProgress({ sourceId, page, stopped: 'empty-page' });
+        break;
+      }
+      // Se trouxe ofertas mas ZERO novas (todas duplicadas), provavelmente
+      // a paginação está quebrada — para pra não ficar girando.
+      if (offers.length > 0 && added === 0 && page > 1) {
+        if (onProgress) onProgress({ sourceId, page, stopped: 'all-duplicates', reason: 'paginação parece quebrada — pg atual idêntica a anterior' });
         break;
       }
     } catch (e) {

@@ -7,6 +7,7 @@ import WorkspaceForm from '../components/WorkspaceForm.jsx';
 import MLStatus from '../components/MLStatus.jsx';
 import Onboarding from '../components/Onboarding.jsx';
 import SweepConsole from '../components/SweepConsole.jsx';
+import PaginationDiagnostic from '../components/PaginationDiagnostic.jsx';
 import { Icon } from '../components/Icon.jsx';
 
 export default function Dashboard() {
@@ -185,6 +186,18 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        {/* Diagnóstico de paginação — útil pra detectar fontes quebradas */}
+        {hasWorkspaces && (
+          <details>
+            <summary className="cursor-pointer text-xs opacity-60 hover:opacity-100">
+              🔧 Diagnóstico de fontes
+            </summary>
+            <div className="mt-3">
+              <PaginationDiagnostic />
+            </div>
+          </details>
+        )}
 
         {/* Zona de perigo */}
         {hasWorkspaces && <DangerZone onReset={load} />}

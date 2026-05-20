@@ -83,6 +83,7 @@ export const api = {
 
   // System: reset total (apaga scrape + ofertas + fila + agent logs)
   systemReset: () => request('/api/system/reset', { method: 'POST' }),
+  validatePaginationStreamUrl: () => '/api/system/validate-pagination/stream',
 
   resetOffers: (id, status = 'all') => request(`/api/workspaces/${id}/offers/reset?status=${status}`, { method: 'POST' }),
 

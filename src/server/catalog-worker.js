@@ -41,8 +41,12 @@ let sweepBuffer = []; // limpa ao iniciar nova varredura
 const MAX_BUFFER = 1000;
 
 function emitSweep(evt) {
-  if (sweepBuffer.length < MAX_BUFFER) sweepBuffer.push(evt);
-  sweepEmitter.emit('event', evt);
+  // Carimba timestamp do servidor pra que clientes que se anexam no meio
+  // (replay do buffer) vejam a ordem cronológica REAL, não o momento em
+  // que o batch chega no socket.
+  const stamped = { ...evt, _ts: Date.now() };
+  if (sweepBuffer.length < MAX_BUFFER) sweepBuffer.push(stamped);
+  sweepEmitter.emit('event', stamped);
 }
 
 export function getSweepBuffer() {
