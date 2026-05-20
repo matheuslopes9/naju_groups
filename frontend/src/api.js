@@ -75,6 +75,7 @@ export const api = {
   queueUpcoming: (id) => request(`/api/workspaces/${id}/queue/upcoming`),
   queueCancel: (id, queueId) => request(`/api/workspaces/${id}/queue/cancel/${queueId}`, { method: 'POST' }),
   queueRefill: (id) => request(`/api/workspaces/${id}/queue/refill`, { method: 'POST' }),
+  queueReschedule: (id) => request(`/api/workspaces/${id}/queue/reschedule`, { method: 'POST' }),
 
   // Quick start: reprocessa scrape histórico + enfileira + ativa bot
   quickStart: (id) => request(`/api/workspaces/${id}/quick-start`, { method: 'POST', body: JSON.stringify({ activate: true }) }),

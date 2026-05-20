@@ -8,7 +8,7 @@ import { attachAffiliateTag } from '../ml/affiliate.js';
 import { getAffiliateTag } from '../ml/oauth.js';
 import { NICHE_PRESETS, findNiche } from '../ml/niches.js';
 import { runCatalogSweep, getCatalogSweepStatus, distributeToWorkspace, applyWorkspaceFilters } from '../catalog-worker.js';
-import { getQueueStats, listUpcoming, enqueueApprovedOffers } from '../queue.js';
+import { getQueueStats, listUpcoming, enqueueApprovedOffers, rescheduleQueue } from '../queue.js';
 
 const router = Router();
 
@@ -158,8 +158,31 @@ router.patch('/:id', async (req, res) => {
   ];
   const data = {};
   for (const k of allowed) if (k in (req.body ?? {})) data[k] = req.body[k];
+
+  // Detecta mudança de timing — vai disparar reagendamento da fila depois
+  const prev = await prisma.workspace.findUnique({
+    where: { id: req.params.id },
+    select: { queueIntervalMin: true, sendWindowStart: true, sendWindowEnd: true },
+  });
+  const timingChanged = prev && (
+    ('queueIntervalMin' in data && data.queueIntervalMin !== prev.queueIntervalMin) ||
+    ('sendWindowStart' in data && data.sendWindowStart !== prev.sendWindowStart) ||
+    ('sendWindowEnd' in data && data.sendWindowEnd !== prev.sendWindowEnd)
+  );
+
   const ws = await prisma.workspace.update({ where: { id: req.params.id }, data });
-  res.json(ws);
+
+  let rescheduled = 0;
+  if (timingChanged) {
+    try {
+      const r = await rescheduleQueue(ws);
+      rescheduled = r.rescheduled;
+    } catch (e) {
+      console.warn(`reschedule queue ws=${ws.id}:`, e.message);
+    }
+  }
+
+  res.json({ ...ws, _rescheduled: rescheduled });
 });
 
 // Limpa histórico de ofertas do workspace (reset cooldown)
@@ -418,6 +441,13 @@ router.post('/:id/queue/cancel/:queueId', async (req, res) => {
     data: { status: 'cancelled' },
   });
   res.json({ ok: true });
+});
+
+router.post('/:id/queue/reschedule', async (req, res) => {
+  const ws = await prisma.workspace.findUnique({ where: { id: req.params.id } });
+  if (!ws) return res.status(404).json({ error: 'workspace não existe' });
+  const r = await rescheduleQueue(ws);
+  res.json(r);
 });
 
 router.post('/:id/queue/refill', async (req, res) => {

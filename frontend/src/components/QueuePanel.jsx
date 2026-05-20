@@ -50,6 +50,15 @@ export default function QueuePanel({ ws, reload }) {
     } catch (e) { toast.error(e.message); }
   }
 
+  async function reschedule() {
+    if (!confirm('Re-espacar todos os itens da fila a partir de agora com o intervalo atual?')) return;
+    try {
+      const r = await api.queueReschedule(ws.id);
+      toast.success(`${r.rescheduled} itens re-agendados`);
+      refresh();
+    } catch (e) { toast.error(e.message); }
+  }
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
@@ -66,6 +75,9 @@ export default function QueuePanel({ ws, reload }) {
         </button>
         <button onClick={refill} className="btn-secondary text-sm">
           ➕ Reabastecer fila
+        </button>
+        <button onClick={reschedule} className="btn-secondary text-sm" title="Re-espacar todos com intervalo atual">
+          🔄 Re-agendar
         </button>
         <span className="text-xs opacity-60">
           Janela: {ws.sendWindowStart ?? '08:00'} — {ws.sendWindowEnd ?? '22:00'} · {ws.queueIntervalMin ?? 5}min entre envios

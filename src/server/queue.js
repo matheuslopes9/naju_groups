@@ -44,7 +44,7 @@ export function isWithinSendWindow(ws, date = new Date()) {
  * - Se está dentro → max(lastScheduled + interval, agora + 1min)
  */
 export async function computeNextSlot(ws, fromDate = new Date()) {
-  const intervalMs = (ws.queueIntervalMin ?? 10) * 60_000;
+  const intervalMs = (ws.queueIntervalMin ?? 5) * 60_000;
   const start = parseTimeOfDay(ws.sendWindowStart) ?? 8 * 60;
   const end = parseTimeOfDay(ws.sendWindowEnd) ?? 22 * 60;
 
@@ -197,6 +197,65 @@ export async function enqueueApprovedOffers(ws, maxToQueue = 500) {
     }
   }
   return { enqueued };
+}
+
+/**
+ * Re-agenda TODOS os itens 'queued' do workspace com os filtros/janela
+ * atuais. Útil quando o usuário mudou queueIntervalMin/sendWindow*.
+ *
+ * Ordem dos itens é preservada (orderBy scheduledFor asc). Apenas
+ * `scheduledFor` é recalculado em sequência a partir de "agora".
+ */
+export async function rescheduleQueue(ws) {
+  const intervalMs = (ws.queueIntervalMin ?? 5) * 60_000;
+  const start = parseTimeOfDay(ws.sendWindowStart) ?? 8 * 60;
+  const end = parseTimeOfDay(ws.sendWindowEnd) ?? 22 * 60;
+
+  const items = await prisma.queuedSend.findMany({
+    where: { workspaceId: ws.id, status: 'queued' },
+    orderBy: { scheduledFor: 'asc' },
+    select: { id: true },
+  });
+
+  if (items.length === 0) return { rescheduled: 0 };
+
+  // Calcula slot inicial: agora + 1min, ajustado pra dentro da janela
+  let cursor = new Date(Date.now() + 60_000);
+  cursor = clampToWindow(cursor, start, end);
+
+  let updated = 0;
+  for (const item of items) {
+    await prisma.queuedSend.update({
+      where: { id: item.id },
+      data: { scheduledFor: cursor },
+    });
+    updated++;
+    // próximo slot
+    cursor = clampToWindow(new Date(cursor.getTime() + intervalMs), start, end);
+  }
+  return { rescheduled: updated };
+}
+
+/**
+ * Ajusta uma data pra cair dentro da janela [start, end] em minutos do dia.
+ * Se já está, retorna. Se está antes, empurra pro início. Se está depois,
+ * empurra pro início do próximo dia.
+ */
+function clampToWindow(date, startMin, endMin) {
+  for (let i = 0; i < 3; i++) {
+    const mins = date.getHours() * 60 + date.getMinutes();
+    if (mins >= startMin && mins < endMin) return date;
+    if (mins < startMin) {
+      const out = new Date(date);
+      out.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+      return out;
+    }
+    // mins >= endMin → próximo dia
+    const out = new Date(date.getTime() + 24 * 60 * 60 * 1000);
+    out.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+    date = out;
+  }
+  return date;
 }
 
 /**
