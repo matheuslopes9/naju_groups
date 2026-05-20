@@ -168,7 +168,7 @@ function OverviewTab({ ws }) {
     { label: 'WhatsApp',        value: ws.wa?.status ?? '—',     icon: Icon.Phone },
     { label: 'Número',          value: ws.wa?.phoneNumber ?? '—', icon: Icon.Phone },
     { label: 'Grupos',          value: ws.groups?.length ?? 0,   icon: Icon.Users },
-    { label: 'Auto-busca',      value: ws.autoSearch ? `${ws.intervalMin} min` : 'off', icon: Icon.Zap },
+    { label: 'Bot auto',        value: ws.autoApproveEnabled ? `score ≥ ${ws.autoApproveThreshold}` : 'off', icon: Icon.Zap },
     { label: 'Desconto mínimo', value: `${ws.minDiscount}%`,     icon: Icon.Tag },
     { label: 'Filtros',         value: [ws.onlyFreeShipping && 'frete', ws.onlyDeals && 'deal'].filter(Boolean).join(' · ') || '—', icon: Icon.Filter },
   ];

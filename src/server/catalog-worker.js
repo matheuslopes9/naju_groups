@@ -103,12 +103,11 @@ export async function runCatalogSweep(onProgress) {
         return { ...o, categoryDetected, commissionPct, estimatedCommission: estimated };
       });
 
-      // Distribui pra cada workspace que tenha essa source no catalogSources OU
-      // não tenha nenhuma source escolhida (vale-tudo).
+      // Distribui pra TODOS os workspaces com auto-aprovação ativa.
+      // Keywords + categoria detectada do título decidem se a oferta entra
+      // (filtro abaixo). Categoria da fonte (cellphones, fashion-f) é só
+      // metadata pra debug.
       for (const ws of workspaces) {
-        const enabled = (ws.catalogSources ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-        if (enabled.length > 0 && !enabled.includes(source.id)) continue;
-
         let savedForWs = 0;
         const cooldownMs = (ws.cooldownDays ?? 30) * 24 * 60 * 60 * 1000;
         const cooldownDate = new Date(Date.now() - cooldownMs);

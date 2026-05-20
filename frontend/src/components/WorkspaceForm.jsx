@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Icon } from './Icon.jsx';
-import { api } from '../api.js';
 
 /**
  * Sugestões de keywords pré-prontas por nicho.
@@ -34,16 +33,8 @@ export default function WorkspaceForm({ initial, onSubmit }) {
     priceMin: 30,
     priceMax: 300,
     cooldownDays: 30,
-    maxPerRun: 10,
-    intervalMin: 60,
-    catalogSources: '',
   });
   const [saving, setSaving] = useState(false);
-  const [catalog, setCatalog] = useState([]);
-
-  useEffect(() => {
-    api.listCatalog().then(setCatalog).catch(() => {});
-  }, []);
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
 
@@ -63,43 +54,12 @@ export default function WorkspaceForm({ initial, onSubmit }) {
     const current = parseCsv(form.keywords);
 
     if (isPresetActive(presetKey)) {
-      // Remove todas as keywords desse preset
       const next = current.filter((k) => !presetLower.has(k.toLowerCase()));
       set('keywords', toCsv(next));
     } else {
-      // Adiciona (mantém as já presentes do mesmo preset, evita duplicar)
       set('keywords', toCsv([...current, ...presetKws]));
     }
   }
-
-  // Catálogo de fontes — Set baseado em form.catalogSources (CSV)
-  const activeSources = useMemo(() => new Set(parseCsv(form.catalogSources)), [form.catalogSources]);
-
-  function toggleSource(id) {
-    const next = new Set(activeSources);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    set('catalogSources', Array.from(next).join(','));
-  }
-
-  function toggleAllSources(ids, mode) {
-    // mode: 'add' ou 'remove'
-    const next = new Set(activeSources);
-    for (const id of ids) {
-      if (mode === 'add') next.add(id);
-      else next.delete(id);
-    }
-    set('catalogSources', Array.from(next).join(','));
-  }
-
-  const catalogByCategory = useMemo(() => {
-    const map = {};
-    for (const s of catalog) {
-      if (!map[s.category]) map[s.category] = [];
-      map[s.category].push(s);
-    }
-    return map;
-  }, [catalog]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -121,7 +81,7 @@ export default function WorkspaceForm({ initial, onSubmit }) {
         </Field>
       </div>
 
-      <Field label="Palavras-chave para filtrar" helper="Só ofertas cujo título contém uma destas palavras. Clique nos chips pra adicionar/remover blocos prontos.">
+      <Field label="Palavras-chave para filtrar" helper="O bot varre 15 fontes do ML automaticamente. Aqui você diz quais palavras o título precisa conter pra essa oferta cair neste workspace. Clique nos chips pra adicionar/remover blocos prontos.">
         <textarea
           value={form.keywords ?? ''}
           onChange={(e) => set('keywords', e.target.value)}
@@ -149,56 +109,6 @@ export default function WorkspaceForm({ initial, onSubmit }) {
         </div>
       </Field>
 
-      {/* Catálogo de fontes — multi-select agrupado por categoria */}
-      {catalog.length > 0 && (
-        <Field
-          label={`Fontes do catálogo (${activeSources.size}/${catalog.length})`}
-          helper="Quais das 15 fontes do ML esse workspace vai receber. Vazio = recebe de TODAS."
-        >
-          <div className="space-y-3 p-3 rounded-lg" style={{ background: 'rgba(var(--bg-elevated), 0.4)' }}>
-            {Object.entries(catalogByCategory).map(([cat, srcs]) => {
-              const ids = srcs.map((s) => s.id);
-              const allActive = ids.every((id) => activeSources.has(id));
-              const someActive = ids.some((id) => activeSources.has(id));
-              return (
-                <div key={cat}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[10px] uppercase tracking-wider font-semibold opacity-60">{cat}</span>
-                    <button
-                      type="button"
-                      onClick={() => toggleAllSources(ids, allActive ? 'remove' : 'add')}
-                      className="text-[10px] opacity-70 hover:opacity-100"
-                    >
-                      {allActive ? 'desmarcar todos' : someActive ? 'marcar todos' : 'marcar todos'}
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {srcs.map((s) => {
-                      const isSel = activeSources.has(s.id);
-                      return (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onClick={() => toggleSource(s.id)}
-                          className={`text-[11px] px-2.5 py-1 rounded-md border transition flex items-center gap-1 ${
-                            isSel ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-200' : ''
-                          }`}
-                          style={!isSel ? { borderColor: 'rgb(var(--border-strong))', color: 'rgb(var(--text-muted))' } : {}}
-                          title={`${s.method === 'playwright' ? '🎭 browser' : '⚡ fetch'} · ${s.pages} pgs`}
-                        >
-                          {isSel && <Icon.Check width={10} height={10} strokeWidth={3} />}
-                          {s.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Field>
-      )}
-
       <div className="grid sm:grid-cols-3 gap-3">
         <Field label="Desconto mín %">
           <input type="number" min="0" max="99" value={form.minDiscount}
@@ -214,20 +124,10 @@ export default function WorkspaceForm({ initial, onSubmit }) {
         </Field>
       </div>
 
-      <div className="grid sm:grid-cols-3 gap-3">
-        <Field label="Cooldown (dias)" helper="Não mostrar mesmo produto antes de N dias">
-          <input type="number" min="1" max="180" value={form.cooldownDays ?? 30}
-                 onChange={(e) => set('cooldownDays', Number(e.target.value))} className="input" />
-        </Field>
-        <Field label="Máx/rodada">
-          <input type="number" min="1" max="100" value={form.maxPerRun}
-                 onChange={(e) => set('maxPerRun', Number(e.target.value))} className="input" />
-        </Field>
-        <Field label="Intervalo auto (min)">
-          <input type="number" min="15" max="1440" value={form.intervalMin}
-                 onChange={(e) => set('intervalMin', Number(e.target.value))} className="input" />
-        </Field>
-      </div>
+      <Field label="Cooldown (dias)" helper="Não mostrar mesmo produto antes de N dias">
+        <input type="number" min="1" max="180" value={form.cooldownDays ?? 30}
+               onChange={(e) => set('cooldownDays', Number(e.target.value))} className="input max-w-[180px]" />
+      </Field>
 
       <div className="flex flex-wrap gap-4 pt-1">
         <Checkbox label="Frete grátis"  checked={form.onlyFreeShipping} onChange={(v) => set('onlyFreeShipping', v)} />

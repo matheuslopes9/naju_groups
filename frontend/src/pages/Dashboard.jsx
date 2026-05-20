@@ -6,6 +6,8 @@ import Layout from '../components/Layout.jsx';
 import WorkspaceForm from '../components/WorkspaceForm.jsx';
 import MLStatus from '../components/MLStatus.jsx';
 import Onboarding from '../components/Onboarding.jsx';
+import FirstRunModal from '../components/FirstRunModal.jsx';
+import SweepStatusBadge from '../components/SweepStatusBadge.jsx';
 import { Icon } from '../components/Icon.jsx';
 
 export default function Dashboard() {
@@ -50,6 +52,7 @@ export default function Dashboard() {
 
   return (
     <Layout>
+      {hasWorkspaces && <FirstRunModal onSweepDone={load} />}
       <div className="space-y-6">
         {hasWorkspaces && <MLStatus />}
 
@@ -68,6 +71,9 @@ export default function Dashboard() {
             <p className="text-sm mt-1" style={{ color: 'rgb(var(--text-muted))' }}>
               Visão geral dos seus workspaces e ofertas pendentes de curadoria
             </p>
+            {hasWorkspaces && (
+              <div className="mt-2"><SweepStatusBadge onTrigger={load} /></div>
+            )}
           </div>
           <button
             onClick={() => setShowForm((v) => !v)}
@@ -239,7 +245,7 @@ function WorkspaceCard({ ws }) {
         <span className="flex items-center gap-1"><Icon.Phone width={12} height={12} /> {ws.wa?.phoneNumber ?? '—'}</span>
         <span className="flex items-center gap-1"><Icon.Users width={12} height={12} /> {ws._count?.groups ?? 0}</span>
         <span className="flex items-center gap-1"><Icon.ShoppingBag width={12} height={12} /> {ws._count?.offers ?? 0}</span>
-        {ws.autoSearch && (
+        {ws.autoApproveEnabled && (
           <span className="flex items-center gap-1 text-emerald-400"><Icon.Zap width={12} height={12} /> auto</span>
         )}
       </div>

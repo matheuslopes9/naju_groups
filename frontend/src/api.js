@@ -66,13 +66,6 @@ export const api = {
   availableNiches: () => request('/api/workspaces/ml/niches'),
   applyNiche: (id, nicheId) => request(`/api/workspaces/${id}/apply-niche`, { method: 'POST', body: JSON.stringify({ nicheId }) }),
 
-  // Fontes de scraping
-  availableSources: () => request('/api/workspaces/ml/sources'),
-  listSources: (id) => request(`/api/workspaces/${id}/sources`),
-  addSource: (id, slug, maxPages) => request(`/api/workspaces/${id}/sources`, { method: 'POST', body: JSON.stringify({ slug, maxPages }) }),
-  updateSource: (id, rowId, data) => request(`/api/workspaces/${id}/sources/${rowId}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  deleteSource: (id, rowId) => request(`/api/workspaces/${id}/sources/${rowId}`, { method: 'DELETE' }),
-
   // Catálogo global de fontes (15 URLs validadas)
   listCatalog: () => request('/api/workspaces/ml/catalog'),
   sweepStatus: () => request('/api/workspaces/catalog/sweep/status'),
@@ -84,12 +77,9 @@ export const api = {
   queueCancel: (id, queueId) => request(`/api/workspaces/${id}/queue/cancel/${queueId}`, { method: 'POST' }),
   queueRefill: (id) => request(`/api/workspaces/${id}/queue/refill`, { method: 'POST' }),
 
-  // Search com SSE - retorna URL pra EventSource
-  searchStreamUrl: (id) => `/api/workspaces/${id}/search/stream`,
   resetOffers: (id, status = 'all') => request(`/api/workspaces/${id}/offers/reset?status=${status}`, { method: 'POST' }),
 
   // Offers
-  searchNow: (id) => request(`/api/workspaces/${id}/search`, { method: 'POST' }),
   addOfferByUrl: (id, url) => request(`/api/workspaces/${id}/offers/add-by-url`, { method: 'POST', body: JSON.stringify({ url }) }),
   listOffers: (id, status = 'pending') => request(`/api/workspaces/${id}/offers?status=${status}`),
   approveOffer: (id, oid) => request(`/api/workspaces/${id}/offers/${oid}/approve`, { method: 'POST' }),

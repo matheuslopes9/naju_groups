@@ -2,9 +2,8 @@ import { Router } from 'express';
 import { prisma } from '../db.js';
 import { waManager } from '../whatsapp/manager.js';
 import { formatOffer } from '../formatter.js';
-import { runWorkspace } from '../worker.js';
 import { audit } from '../audit.js';
-import { fetchItemByUrl, AVAILABLE_SOURCES, listCatalogSources } from '../ml/scraper.js';
+import { fetchItemByUrl, listCatalogSources } from '../ml/scraper.js';
 import { attachAffiliateTag } from '../ml/affiliate.js';
 import { getAffiliateTag } from '../ml/oauth.js';
 import { NICHE_PRESETS, findNiche } from '../ml/niches.js';
@@ -104,8 +103,6 @@ router.post('/', async (req, res) => {
       name: b.name,
       niche: b.niche ?? null,
       description: b.description ?? null,
-      searchQuery: b.searchQuery ?? null,
-      categoryIds: b.categoryIds ?? null,
       keywords: b.keywords ?? null,
       minDiscount: b.minDiscount ?? 20,
       onlyFreeShipping: b.onlyFreeShipping ?? true,
@@ -113,9 +110,6 @@ router.post('/', async (req, res) => {
       priceMin: b.priceMin ?? null,
       priceMax: b.priceMax ?? null,
       cooldownDays: b.cooldownDays ?? 30,
-      maxPerRun: b.maxPerRun ?? 3,
-      intervalMin: b.intervalMin ?? 60,
-      catalogSources: b.catalogSources ?? null,
       sendWindowStart: b.sendWindowStart ?? '08:00',
       sendWindowEnd: b.sendWindowEnd ?? '22:00',
       queueIntervalMin: b.queueIntervalMin ?? 10,
@@ -136,12 +130,12 @@ router.get('/:id', async (req, res) => {
 
 router.patch('/:id', async (req, res) => {
   const allowed = [
-    'name', 'niche', 'description', 'searchQuery', 'categoryIds',
-    'minDiscount', 'onlyFreeShipping', 'onlyDeals', 'maxPerRun', 'intervalMin', 'autoSearch',
+    'name', 'niche', 'description',
+    'minDiscount', 'onlyFreeShipping', 'onlyDeals',
     'keywords', 'priceMin', 'priceMax', 'cooldownDays',
     'autoApproveEnabled', 'autoApproveThreshold', 'autoApproveMaxDaily',
-    'autoApproveMinIntervalMin', 'nichePreset', 'audience', 'adStyle', 'typingSimulation',
-    'catalogSources', 'sendWindowStart', 'sendWindowEnd', 'queueIntervalMin',
+    'nichePreset', 'audience', 'adStyle', 'typingSimulation',
+    'sendWindowStart', 'sendWindowEnd', 'queueIntervalMin',
   ];
   const data = {};
   for (const k of allowed) if (k in (req.body ?? {})) data[k] = req.body[k];
@@ -248,21 +242,23 @@ router.delete('/:id/groups/:groupId', async (req, res) => {
   res.json({ ok: true });
 });
 
-// ---- Fontes de scraping (URLs do ML que o bot vai varrer) ----
+// ---- Catálogo de fontes (15 URLs do ML — varredura global) ----
 
-// Lista as fontes disponíveis (validadas empiricamente)
-router.get('/ml/sources', async (_req, res) => {
-  res.json(AVAILABLE_SOURCES);
-});
-
-// Catálogo NOVO (15 fontes) — pra UI escolher quais ativar
 router.get('/ml/catalog', async (_req, res) => {
   res.json(listCatalogSources());
 });
 
-// Status da varredura do catálogo
+// Status da varredura: além do lastSweepAt, retorna hasSweptToday
+// que o frontend usa pra decidir se mostra o modal de boas-vindas.
 router.get('/catalog/sweep/status', async (_req, res) => {
-  res.json(getCatalogSweepStatus());
+  const status = getCatalogSweepStatus();
+  let hasSweptToday = false;
+  if (status.lastSweepAt) {
+    const last = new Date(status.lastSweepAt);
+    const now = new Date();
+    hasSweptToday = last.toDateString() === now.toDateString();
+  }
+  res.json({ ...status, hasSweptToday });
 });
 
 // Dispara varredura manual do catálogo (SSE: stream do progresso)
@@ -305,54 +301,6 @@ router.post('/:id/apply-niche', async (req, res) => {
   res.json(updated);
 });
 
-router.get('/:id/sources', async (req, res) => {
-  const rows = await prisma.workspaceSource.findMany({
-    where: { workspaceId: req.params.id },
-    orderBy: { createdAt: 'desc' },
-  });
-  res.json(rows);
-});
-
-router.post('/:id/sources', async (req, res) => {
-  const { slug, maxPages } = req.body ?? {};
-  if (slug == null) return res.status(400).json({ error: 'slug obrigatório (pode ser string vazia)' });
-  const src = AVAILABLE_SOURCES.find((s) => s.slug === slug);
-  if (!src) return res.status(400).json({ error: 'Fonte desconhecida' });
-  try {
-    const saved = await prisma.workspaceSource.create({
-      data: {
-        workspaceId: req.params.id,
-        slug: src.slug,
-        label: src.label,
-        maxPages: maxPages ?? src.defaultPages,
-      },
-    });
-    audit('source.add', { entity: 'source', entityId: saved.id, workspaceId: req.params.id, payload: { slug: src.slug } });
-    res.status(201).json(saved);
-  } catch (e) {
-    if (e.code === 'P2002') return res.status(409).json({ error: 'Fonte já cadastrada' });
-    res.status(400).json({ error: e.message });
-  }
-});
-
-router.patch('/:id/sources/:rowId', async (req, res) => {
-  const { enabled, maxPages } = req.body ?? {};
-  const data = {};
-  if (typeof enabled === 'boolean') data.enabled = enabled;
-  if (typeof maxPages === 'number') data.maxPages = Math.max(1, Math.min(10, maxPages));
-  const row = await prisma.workspaceSource.update({
-    where: { id: req.params.rowId },
-    data,
-  });
-  res.json(row);
-});
-
-router.delete('/:id/sources/:rowId', async (req, res) => {
-  await prisma.workspaceSource.delete({ where: { id: req.params.rowId } });
-  audit('source.remove', { entity: 'source', entityId: req.params.rowId, workspaceId: req.params.id });
-  res.json({ ok: true });
-});
-
 // Adicionar oferta MANUAL via URL colada (escape do bloqueio da API ML)
 router.post('/:id/offers/add-by-url', async (req, res) => {
   const { url } = req.body ?? {};
@@ -387,50 +335,6 @@ router.post('/:id/offers/add-by-url', async (req, res) => {
     }
     res.status(400).json({ error: e.message });
   }
-});
-
-// Buscar ofertas agora (manual, sem streaming)
-router.post('/:id/search', async (req, res) => {
-  const ws = await prisma.workspace.findUnique({ where: { id: req.params.id } });
-  if (!ws) return res.status(404).json({ error: 'not found' });
-  try {
-    const result = await runWorkspace(ws);
-    audit('offer.search', { entity: 'offer', workspaceId: ws.id, payload: result });
-    res.json({ ok: true, ...result });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Buscar com SSE streaming (progress bar real-time)
-router.get('/:id/search/stream', async (req, res) => {
-  const ws = await prisma.workspace.findUnique({ where: { id: req.params.id } });
-  if (!ws) {
-    res.status(404).json({ error: 'not found' });
-    return;
-  }
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders?.();
-
-  const send = (data) => {
-    try { res.write(`data: ${JSON.stringify(data)}\n\n`); }
-    catch {}
-  };
-
-  send({ stage: 'connected' });
-
-  try {
-    const result = await runWorkspace(ws, send);
-    audit('offer.search', { entity: 'offer', workspaceId: ws.id, payload: result });
-    send({ stage: 'complete', ...result });
-  } catch (e) {
-    send({ stage: 'fatal', error: e.message });
-  }
-  res.end();
 });
 
 // Fila de envio: estatísticas + próximos

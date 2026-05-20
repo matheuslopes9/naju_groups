@@ -1,7 +1,8 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { toast } from '../toast.jsx';
 import { Icon } from './Icon.jsx';
+import SweepStatusBadge from './SweepStatusBadge.jsx';
 
 const TABS = [
   { id: 'pending',  label: 'Pendentes', icon: Icon.Sparkles },
@@ -13,11 +14,9 @@ export default function OffersPanel({ ws }) {
   const [tab, setTab] = useState('pending');
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [progress, setProgress] = useState(null);
   const [manualUrl, setManualUrl] = useState('');
   const [addingUrl, setAddingUrl] = useState(false);
-  const [affSession, setAffSession] = useState(null); // status da sessão de afiliado
-  const evtRef = useRef(null);
+  const [affSession, setAffSession] = useState(null);
 
   useEffect(() => {
     api.affiliateSessionGet().then(setAffSession).catch(() => setAffSession({ status: 'unknown' }));
@@ -29,52 +28,6 @@ export default function OffersPanel({ ws }) {
     finally { setLoading(false); }
   }
   useEffect(() => { load(); }, [ws.id, tab]);
-
-  function startSSE() {
-    if (evtRef.current) return; // já tem busca rodando
-    setProgress({ stage: 'connecting', label: 'Conectando…' });
-
-    const url = api.searchStreamUrl(ws.id);
-    const es = new EventSource(url, { withCredentials: true });
-    evtRef.current = es;
-
-    es.onmessage = (e) => {
-      try {
-        const evt = JSON.parse(e.data);
-        setProgress(evt);
-        if (evt.stage === 'complete') {
-          if (evt.saved > 0) toast.success(`${evt.saved} oferta(s) salva(s) (${evt.scanned} analisadas)`);
-          else toast.info('Nenhuma oferta nova com seus filtros — tente relaxar os critérios');
-          es.close();
-          evtRef.current = null;
-          setTab('pending');
-          load();
-          setTimeout(() => setProgress(null), 3000);
-        } else if (evt.stage === 'fatal') {
-          toast.error(evt.error ?? 'Falha na busca');
-          es.close();
-          evtRef.current = null;
-          setTimeout(() => setProgress(null), 2000);
-        }
-      } catch {}
-    };
-    es.onerror = () => {
-      es.close();
-      evtRef.current = null;
-      setProgress((p) => p?.stage === 'complete' ? p : { stage: 'fatal', error: 'Conexão perdida' });
-      setTimeout(() => setProgress(null), 3000);
-    };
-  }
-
-  function stopSSE() {
-    if (evtRef.current) {
-      evtRef.current.close();
-      evtRef.current = null;
-      setProgress(null);
-    }
-  }
-
-  useEffect(() => () => stopSSE(), []);
 
   async function addByUrl() {
     if (!manualUrl.trim()) return;
@@ -127,8 +80,6 @@ export default function OffersPanel({ ws }) {
     } catch (e) { toast.error(e.message); }
   }
 
-  const running = !!evtRef.current;
-
   return (
     <div className="space-y-4">
       {/* Adicionar oferta por URL manual */}
@@ -170,20 +121,14 @@ export default function OffersPanel({ ws }) {
             );
           })}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <SweepStatusBadge onTrigger={load} />
           <button onClick={resetHistory} className="btn btn-ghost !text-xs !text-rose-400"
                   title="Apaga histórico — libera o cooldown">
             <Icon.Trash width={12} height={12} /> Resetar
           </button>
-          <button onClick={running ? stopSSE : startSSE} className="btn btn-secondary">
-            {running ? <Icon.X width={14} height={14} /> : <Icon.Search width={14} height={14} />}
-            {running ? 'Cancelar busca' : 'Buscar ofertas'}
-          </button>
         </div>
       </div>
-
-      {/* Progress bar SSE */}
-      {progress && <ProgressView progress={progress} />}
 
       {/* Lista */}
       {loading ? (
@@ -196,10 +141,10 @@ export default function OffersPanel({ ws }) {
           <p style={{ color: 'rgb(var(--text-muted))' }}>
             Nenhuma oferta {tab === 'pending' ? 'pendente' : tab === 'sent' ? 'enviada' : 'rejeitada'}.
           </p>
-          {tab === 'pending' && !running && (
-            <button onClick={startSSE} className="btn btn-primary mt-4">
-              <Icon.Zap width={14} height={14} /> Buscar agora
-            </button>
+          {tab === 'pending' && (
+            <p className="text-xs mt-3 opacity-60">
+              A varredura roda automaticamente a cada 6h. Use "varrer agora" no topo pra forçar.
+            </p>
           )}
         </div>
       ) : (
@@ -211,65 +156,6 @@ export default function OffersPanel({ ws }) {
               onReject={() => reject(o.id)}
               onSetShortlink={(sl) => setShortlink(o.id, sl)} />
           ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProgressView({ progress }) {
-  const { stage, current, total, source, page, totalPages, scanned, filtered, saved, error } = progress;
-
-  let label = '';
-  let percent = null;
-
-  if (stage === 'connecting' || stage === 'connected') {
-    label = 'Conectando…';
-    percent = 5;
-  } else if (stage === 'start') {
-    label = `Iniciando busca em ${total} fonte(s)…`;
-    percent = 10;
-  } else if (stage === 'source-start') {
-    label = `Fonte ${current}/${total}: ${source}`;
-    percent = 10 + ((current - 1) / total) * 80;
-  } else if (stage === 'page') {
-    label = `${source} — página ${page}/${totalPages} (${progress.found ?? 0} encontrados)`;
-    if (total) percent = 10 + ((current - 1 + (page / totalPages)) / total) * 80;
-  } else if (stage === 'source-done') {
-    label = `✓ ${source}: ${saved} salvas (${filtered}/${scanned} passaram filtros)`;
-    if (total) percent = 10 + (current / total) * 80;
-  } else if (stage === 'source-error') {
-    label = `⚠️ ${source}: ${error}`;
-  } else if (stage === 'complete') {
-    label = `Concluído — ${saved} oferta(s) nova(s) (${scanned} analisadas)`;
-    percent = 100;
-  } else if (stage === 'fatal') {
-    label = `Erro: ${error}`;
-  } else if (stage === 'error') {
-    label = progress.message ?? 'Erro';
-  }
-
-  const isError = stage === 'fatal' || stage === 'source-error' || stage === 'error';
-  const isDone = stage === 'complete';
-
-  return (
-    <div className="card animate-fade-in">
-      <div className="flex items-center gap-3 mb-3">
-        {isDone ? (
-          <Icon.Check className="text-emerald-400" width={18} height={18} />
-        ) : isError ? (
-          <Icon.X className="text-rose-400" width={18} height={18} />
-        ) : (
-          <Icon.Loader className="text-indigo-400 animate-spin" width={18} height={18} />
-        )}
-        <span className="text-sm font-medium flex-1">{label}</span>
-      </div>
-      {percent != null && (
-        <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'rgba(var(--bg-elevated), 0.8)' }}>
-          <div
-            className={`h-full rounded-full transition-all duration-300 ${isError ? 'bg-rose-500' : isDone ? 'bg-emerald-500' : 'bg-gradient-brand'}`}
-            style={{ width: `${percent}%` }}
-          />
         </div>
       )}
     </div>
