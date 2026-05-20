@@ -163,29 +163,3 @@ export default function WorkspaceDetail() {
     </Layout>
   );
 }
-
-function OverviewTab({ ws }) {
-  const stats = [
-    { label: 'WhatsApp',        value: ws.wa?.status ?? '—',     icon: Icon.Phone },
-    { label: 'Número',          value: ws.wa?.phoneNumber ?? '—', icon: Icon.Phone },
-    { label: 'Grupos',          value: ws.groups?.length ?? 0,   icon: Icon.Users },
-    { label: 'Bot auto',        value: ws.autoApproveEnabled ? `score ≥ ${ws.autoApproveThreshold}` : 'off', icon: Icon.Zap },
-    { label: 'Desconto mínimo', value: `${ws.minDiscount}%`,     icon: Icon.Tag },
-    { label: 'Filtros',         value: [ws.onlyFreeShipping && 'frete', ws.onlyDeals && 'deal'].filter(Boolean).join(' · ') || '—', icon: Icon.Filter },
-  ];
-  return (
-    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 stagger">
-      {stats.map((s) => (
-        <div key={s.label} className="card">
-          <div className="flex items-start justify-between mb-2">
-            <span className="text-xs uppercase tracking-wider font-medium" style={{ color: 'rgb(var(--text-muted))' }}>
-              {s.label}
-            </span>
-            <s.icon width={14} height={14} style={{ color: 'rgb(var(--text-muted))' }} />
-          </div>
-          <div className="text-xl font-semibold">{String(s.value)}</div>
-        </div>
-      ))}
-    </div>
-  );
-}

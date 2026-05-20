@@ -88,9 +88,28 @@ router.get('/', async (_req, res) => {
     },
     orderBy: { createdAt: 'desc' },
   });
+  const ids = items.map((w) => w.id);
+  // Contagem da fila + envios de hoje, pra mostrar no card do workspace
+  const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+  const [queued, sentToday] = await Promise.all([
+    prisma.queuedSend.groupBy({
+      by: ['workspaceId'],
+      where: { workspaceId: { in: ids }, status: 'queued' },
+      _count: { _all: true },
+    }),
+    prisma.queuedSend.groupBy({
+      by: ['workspaceId'],
+      where: { workspaceId: { in: ids }, status: 'sent', sentAt: { gte: startOfDay } },
+      _count: { _all: true },
+    }),
+  ]);
+  const queueMap = Object.fromEntries(queued.map((q) => [q.workspaceId, q._count._all]));
+  const sentMap  = Object.fromEntries(sentToday.map((q) => [q.workspaceId, q._count._all]));
   const enriched = items.map((w) => ({
     ...w,
     wa: waManager.getStatusSync(w.id),
+    queueCount: queueMap[w.id] ?? 0,
+    sentToday: sentMap[w.id] ?? 0,
   }));
   res.json(enriched);
 });
@@ -112,7 +131,7 @@ router.post('/', async (req, res) => {
       cooldownDays: b.cooldownDays ?? 30,
       sendWindowStart: b.sendWindowStart ?? '08:00',
       sendWindowEnd: b.sendWindowEnd ?? '22:00',
-      queueIntervalMin: b.queueIntervalMin ?? 10,
+      queueIntervalMin: b.queueIntervalMin ?? 5,
     },
   });
   audit('workspace.create', { entity: 'workspace', entityId: ws.id, workspaceId: ws.id, payload: { name: b.name } });

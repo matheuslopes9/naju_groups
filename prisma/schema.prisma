@@ -41,7 +41,7 @@ model Workspace {
   sendWindowStart      String  @default("08:00") @map("send_window_start")
   sendWindowEnd        String  @default("22:00") @map("send_window_end")
   // Intervalo entre envios da fila (minutos)
-  queueIntervalMin     Int     @default(10) @map("queue_interval_min")
+  queueIntervalMin     Int     @default(5) @map("queue_interval_min")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 

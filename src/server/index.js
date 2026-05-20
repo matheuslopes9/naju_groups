@@ -24,7 +24,7 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
-const BUILD_TAG = 'v1.7-roundrobin-2026-05-20';
+const BUILD_TAG = 'v1.8-cleanup-2026-05-20';
 
 // API pública
 app.get('/healthz', (_req, res) => res.json({ ok: true, build: BUILD_TAG }));

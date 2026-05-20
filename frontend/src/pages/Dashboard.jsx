@@ -6,7 +6,6 @@ import Layout from '../components/Layout.jsx';
 import WorkspaceForm from '../components/WorkspaceForm.jsx';
 import MLStatus from '../components/MLStatus.jsx';
 import Onboarding from '../components/Onboarding.jsx';
-import FirstRunModal from '../components/FirstRunModal.jsx';
 import SweepStatusBadge from '../components/SweepStatusBadge.jsx';
 import { Icon } from '../components/Icon.jsx';
 
@@ -52,7 +51,6 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      {hasWorkspaces && <FirstRunModal onSweepDone={load} />}
       <div className="space-y-6">
         {hasWorkspaces && <MLStatus />}
 
@@ -229,6 +227,8 @@ function WorkspaceCard({ ws }) {
     disconnected: { color: 'badge-muted',   dot: 'bg-slate-400', label: 'desconectado' },
   }[status];
 
+  const botOn = !!ws.autoApproveEnabled;
+
   return (
     <Link to={`/workspaces/${ws.id}`} className="card card-hover block group">
       <div className="flex items-start justify-between gap-3 mb-3">
@@ -236,17 +236,33 @@ function WorkspaceCard({ ws }) {
           <h3 className="font-semibold text-base sm:text-lg truncate group-hover:text-gradient transition-all">{ws.name}</h3>
           {ws.niche && <p className="text-xs sm:text-sm mt-0.5 truncate" style={{ color: 'rgb(var(--text-muted))' }}>{ws.niche}</p>}
         </div>
-        <span className={`badge ${statusInfo.color} shrink-0`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
-          {statusInfo.label}
-        </span>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className={`badge ${botOn ? 'badge-success' : 'badge-muted'} !text-[10px]`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${botOn ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`} />
+            {botOn ? '🤖 ativo' : 'parado'}
+          </span>
+          <span className={`badge ${statusInfo.color} !text-[10px]`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
+            {statusInfo.label}
+          </span>
+        </div>
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: 'rgb(var(--text-muted))' }}>
-        <span className="flex items-center gap-1"><Icon.Phone width={12} height={12} /> {ws.wa?.phoneNumber ?? '—'}</span>
-        <span className="flex items-center gap-1"><Icon.Users width={12} height={12} /> {ws._count?.groups ?? 0}</span>
-        <span className="flex items-center gap-1"><Icon.ShoppingBag width={12} height={12} /> {ws._count?.offers ?? 0}</span>
-        {ws.autoApproveEnabled && (
-          <span className="flex items-center gap-1 text-emerald-400"><Icon.Zap width={12} height={12} /> auto</span>
+        <span className="flex items-center gap-1" title="Grupos cadastrados">
+          <Icon.Users width={12} height={12} /> {ws._count?.groups ?? 0}
+        </span>
+        <span className="flex items-center gap-1" title="Ofertas no inbox">
+          <Icon.ShoppingBag width={12} height={12} /> {ws._count?.offers ?? 0}
+        </span>
+        {ws.queueCount > 0 && (
+          <span className="flex items-center gap-1 text-indigo-400" title="Na fila pra enviar">
+            <Icon.RefreshCw width={12} height={12} /> {ws.queueCount}
+          </span>
+        )}
+        {ws.sentToday > 0 && (
+          <span className="flex items-center gap-1 text-emerald-400" title="Enviadas hoje">
+            <Icon.Check width={12} height={12} /> {ws.sentToday}
+          </span>
         )}
       </div>
     </Link>

@@ -68,7 +68,7 @@ export default function QueuePanel({ ws, reload }) {
           ➕ Reabastecer fila
         </button>
         <span className="text-xs opacity-60">
-          Janela: {ws.sendWindowStart ?? '08:00'} — {ws.sendWindowEnd ?? '22:00'} · {ws.queueIntervalMin ?? 10}min entre envios
+          Janela: {ws.sendWindowStart ?? '08:00'} — {ws.sendWindowEnd ?? '22:00'} · {ws.queueIntervalMin ?? 5}min entre envios
         </span>
       </div>
 

@@ -240,7 +240,7 @@ function AutoApproveSection({ ws, reload }) {
 function SendWindowSection({ ws, reload }) {
   const [start, setStart] = useState(ws.sendWindowStart ?? '08:00');
   const [end, setEnd] = useState(ws.sendWindowEnd ?? '22:00');
-  const [intervalMin, setIntervalMin] = useState(ws.queueIntervalMin ?? 10);
+  const [intervalMin, setIntervalMin] = useState(ws.queueIntervalMin ?? 5);
 
   async function save() {
     try {

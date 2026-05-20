@@ -8,8 +8,6 @@ import WorkspaceDetail from './pages/WorkspaceDetail.jsx';
 import Audit from './pages/Audit.jsx';
 import Tutorials from './pages/Tutorials.jsx';
 import Settings from './pages/Settings.jsx';
-import Debug from './pages/Debug.jsx';
-import TestShortlink from './pages/TestShortlink.jsx';
 import NotFound from './pages/NotFound.jsx';
 
 export default function App() {
@@ -48,8 +46,6 @@ export default function App() {
         <Route path="/audit" element={<Audit />} />
         <Route path="/tutoriais" element={<Tutorials />} />
         <Route path="/configuracoes" element={<Settings />} />
-        <Route path="/debug" element={<Debug />} />
-        <Route path="/testar-shortlink" element={<TestShortlink />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       <Toaster />
