@@ -6,7 +6,7 @@ import Layout from '../components/Layout.jsx';
 import WorkspaceForm from '../components/WorkspaceForm.jsx';
 import MLStatus from '../components/MLStatus.jsx';
 import Onboarding from '../components/Onboarding.jsx';
-import SweepStatusBadge from '../components/SweepStatusBadge.jsx';
+import SweepConsole from '../components/SweepConsole.jsx';
 import { Icon } from '../components/Icon.jsx';
 
 export default function Dashboard() {
@@ -70,7 +70,7 @@ export default function Dashboard() {
               Visão geral dos seus workspaces e ofertas pendentes de curadoria
             </p>
             {hasWorkspaces && (
-              <div className="mt-2"><SweepStatusBadge onTrigger={load} /></div>
+              <div className="mt-2 max-w-3xl"><SweepConsole onTrigger={load} /></div>
             )}
           </div>
           <button
