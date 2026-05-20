@@ -97,21 +97,31 @@ router.get('/', async (_req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { name, niche, description, searchQuery, categoryIds, minDiscount, onlyFreeShipping, onlyDeals, maxPerRun, intervalMin } = req.body ?? {};
-  if (!name) return res.status(400).json({ error: 'name é obrigatório' });
+  const b = req.body ?? {};
+  if (!b.name) return res.status(400).json({ error: 'name é obrigatório' });
   const ws = await prisma.workspace.create({
     data: {
-      name, niche, description,
-      searchQuery: searchQuery ?? null,
-      categoryIds: categoryIds ?? null,
-      minDiscount: minDiscount ?? 20,
-      onlyFreeShipping: onlyFreeShipping ?? true,
-      onlyDeals: onlyDeals ?? true,
-      maxPerRun: maxPerRun ?? 3,
-      intervalMin: intervalMin ?? 60,
+      name: b.name,
+      niche: b.niche ?? null,
+      description: b.description ?? null,
+      searchQuery: b.searchQuery ?? null,
+      categoryIds: b.categoryIds ?? null,
+      keywords: b.keywords ?? null,
+      minDiscount: b.minDiscount ?? 20,
+      onlyFreeShipping: b.onlyFreeShipping ?? true,
+      onlyDeals: b.onlyDeals ?? true,
+      priceMin: b.priceMin ?? null,
+      priceMax: b.priceMax ?? null,
+      cooldownDays: b.cooldownDays ?? 30,
+      maxPerRun: b.maxPerRun ?? 3,
+      intervalMin: b.intervalMin ?? 60,
+      catalogSources: b.catalogSources ?? null,
+      sendWindowStart: b.sendWindowStart ?? '08:00',
+      sendWindowEnd: b.sendWindowEnd ?? '22:00',
+      queueIntervalMin: b.queueIntervalMin ?? 10,
     },
   });
-  audit('workspace.create', { entity: 'workspace', entityId: ws.id, workspaceId: ws.id, payload: { name } });
+  audit('workspace.create', { entity: 'workspace', entityId: ws.id, workspaceId: ws.id, payload: { name: b.name } });
   res.status(201).json(ws);
 });
 
