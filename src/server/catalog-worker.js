@@ -1,15 +1,13 @@
 /**
- * Worker que varre o CATÁLOGO completo de fontes a cada 6h.
- * Diferente do worker.js (que roda por workspace), este varre tudo UMA VEZ
- * e usa as ofertas pra alimentar TODOS os workspaces com auto-aprovação ativa.
+ * Catalog worker: varre as 15 fontes do ML a cada 6h.
  *
- * Dedup global: o mesmo productId pode aparecer em várias fontes (relâmpago
- * e celulares, por ex). Mantemos um Map único por varredura.
+ * Arquitetura em 2 etapas:
+ *   1. SCRAPE → salva em ScrapedOffer (snapshot global, dedup por productId)
+ *   2. DISTRIBUTE → para cada workspace ativo, filtra ScrapedOffer pelas
+ *      regras dele e cria/atualiza Offer (workspaceId+productId unique)
  *
- * Pra cada workspace com autoApproveEnabled:
- *   1. Filtra ofertas que casam com keywords/preço/desconto do workspace
- *   2. Insere na tabela Offer (workspaceId, productId — unique)
- *   3. Chama enqueueApprovedOffers() pra agendar envios
+ * A separação permite "Reprocessar" sem revarrer o ML: a rota quick-start
+ * chama distributeToWorkspace() direto, usando o que já tem em ScrapedOffer.
  */
 import { prisma } from './db.js';
 import { SOURCE_CATALOG } from './ml/sources-catalog.js';
@@ -24,9 +22,7 @@ let lastSweepAt = 0;
 let sweepInFlight = false;
 
 export function startCatalogWorker() {
-  // Primeira varredura: 60s após o boot (dá tempo dos workers básicos subirem)
   setTimeout(() => runCatalogSweep().catch((e) => console.warn('catalog sweep err:', e.message)), 60_000);
-  // Depois a cada 30min checa se já passaram 6h da última
   setInterval(() => {
     const elapsed = Date.now() - lastSweepAt;
     if (elapsed >= SWEEP_INTERVAL_MS && !sweepInFlight) {
@@ -37,9 +33,166 @@ export function startCatalogWorker() {
 }
 
 /**
- * Roda 1 varredura completa do catálogo + enfileiramento pra workspaces ativos.
- * Pode ser chamada manualmente também (botão "Varrer agora").
+ * Salva/atualiza uma oferta scaneada no banco. Dedup por productId.
+ * Atualiza preço/desconto/lastSeenAt se já existe.
  */
+async function upsertScrapedOffer(o, sourceId) {
+  await prisma.scrapedOffer.upsert({
+    where: { productId: o.productId },
+    create: {
+      productId: o.productId,
+      title: o.title,
+      price: o.price,
+      originalPrice: o.originalPrice ?? null,
+      discountPercent: o.discountPercent ?? 0,
+      currency: o.currency ?? 'BRL',
+      permalink: o.permalink,
+      imageUrl: o.image ?? '',
+      freeShipping: !!o.freeShipping,
+      soldQuantity: o.soldQuantity ?? 0,
+      coupon: o.coupon ?? null,
+      highlight: o.highlight ?? null,
+      categoryDetected: o.categoryDetected ?? null,
+      commissionPct: o.commissionPct ?? null,
+      estimatedCommission: o.estimatedCommission ?? null,
+      sourceId,
+    },
+    update: {
+      title: o.title,
+      price: o.price,
+      originalPrice: o.originalPrice ?? null,
+      discountPercent: o.discountPercent ?? 0,
+      coupon: o.coupon ?? null,
+      highlight: o.highlight ?? null,
+      lastSeenAt: new Date(),
+    },
+  });
+}
+
+/**
+ * Aplica filtros do workspace numa lista de ofertas scaneadas e retorna
+ * { passed, stats }. Stats contém o funil pra UI mostrar onde caíram.
+ */
+export function applyWorkspaceFilters(ws, offers) {
+  const stats = {
+    total: offers.length,
+    passed: 0,
+    rejectedByDiscount: 0,
+    rejectedByFreeShipping: 0,
+    rejectedByDeal: 0,
+    rejectedByPriceMin: 0,
+    rejectedByPriceMax: 0,
+    rejectedByKeywords: 0,
+  };
+  const passed = [];
+  for (const o of offers) {
+    if (o.discountPercent < (ws.minDiscount ?? 0)) { stats.rejectedByDiscount++; continue; }
+    if (ws.onlyFreeShipping && !o.freeShipping) { stats.rejectedByFreeShipping++; continue; }
+    if (ws.onlyDeals && !o.originalPrice) { stats.rejectedByDeal++; continue; }
+    if (ws.priceMin != null && o.price < ws.priceMin) { stats.rejectedByPriceMin++; continue; }
+    if (ws.priceMax != null && o.price > ws.priceMax) { stats.rejectedByPriceMax++; continue; }
+    if (!matchKeywords(o, ws.keywords)) { stats.rejectedByKeywords++; continue; }
+    passed.push(o);
+  }
+  stats.passed = passed.length;
+  return { passed, stats };
+}
+
+/**
+ * Distribui ScrapedOffers pra um workspace específico.
+ * Re-aplica filtros atuais, cria/skipa Offers, retorna stats do funil.
+ *
+ * Usada por:
+ *   - runCatalogSweep (depois de salvar todas as ScrapedOffer)
+ *   - rota /quick-start (pra "reprocessar histórico" sem revarrer o ML)
+ */
+export async function distributeToWorkspace(ws, opts = {}) {
+  const limit = opts.limit ?? 2000;
+  const affTag = await getAffiliateTag();
+  const cooldownMs = (ws.cooldownDays ?? 30) * 24 * 60 * 60 * 1000;
+  const cooldownDate = new Date(Date.now() - cooldownMs);
+
+  const scraped = await prisma.scrapedOffer.findMany({
+    orderBy: { lastSeenAt: 'desc' },
+    take: limit,
+  });
+
+  // Normaliza pra ter `image` (catalog usa image, scrapedOffer usa imageUrl)
+  const normalized = scraped.map((s) => ({
+    productId: s.productId,
+    title: s.title,
+    price: s.price,
+    originalPrice: s.originalPrice,
+    discountPercent: s.discountPercent,
+    currency: s.currency,
+    permalink: s.permalink,
+    image: s.imageUrl,
+    freeShipping: s.freeShipping,
+    soldQuantity: s.soldQuantity,
+    coupon: s.coupon,
+    highlight: s.highlight,
+    categoryDetected: s.categoryDetected,
+    commissionPct: s.commissionPct,
+    estimatedCommission: s.estimatedCommission,
+  }));
+
+  const { passed, stats } = applyWorkspaceFilters(ws, normalized);
+
+  // Cooldown: produtos já vistos por esse workspace nos últimos N dias
+  const productIds = passed.map((o) => o.productId);
+  const recent = productIds.length > 0 ? await prisma.offer.findMany({
+    where: {
+      productId: { in: productIds },
+      workspaceId: ws.id,
+      createdAt: { gte: cooldownDate },
+    },
+    select: { productId: true },
+  }) : [];
+  const recentSet = new Set(recent.map((r) => r.productId));
+  stats.skippedByCooldown = recentSet.size;
+
+  let saved = 0;
+  for (const o of passed) {
+    if (recentSet.has(o.productId)) continue;
+    const score = scoreOffer(o, {
+      estimatedCommission: o.estimatedCommission,
+      priceMin: ws.priceMin ?? 30,
+      priceMax: ws.priceMax ?? 500,
+    });
+    const affiliateUrl = attachAffiliateTag(o.permalink, affTag);
+    try {
+      await prisma.offer.create({
+        data: {
+          workspaceId: ws.id,
+          productId: o.productId,
+          title: o.title,
+          price: o.price,
+          originalPrice: o.originalPrice,
+          discountPercent: o.discountPercent,
+          currency: o.currency ?? 'BRL',
+          permalink: o.permalink,
+          affiliateUrl,
+          imageUrl: o.image ?? '',
+          freeShipping: !!o.freeShipping,
+          soldQuantity: o.soldQuantity ?? 0,
+          coupon: o.coupon,
+          highlight: o.highlight,
+          categoryDetected: o.categoryDetected,
+          commissionPct: o.commissionPct,
+          estimatedCommission: o.estimatedCommission,
+          score,
+          status: 'pending',
+        },
+      });
+      saved++;
+    } catch {
+      // dup (workspaceId+productId) — pode acontecer em concorrência ou reprocessamento
+    }
+  }
+  stats.saved = saved;
+  return stats;
+}
+
 export async function runCatalogSweep(onProgress) {
   if (sweepInFlight) {
     console.log('⚠️  Varredura do catálogo já em andamento — ignorando');
@@ -52,25 +205,13 @@ export async function runCatalogSweep(onProgress) {
     console.log('\n🌐 Iniciando varredura completa do catálogo (15 fontes)...');
     onProgress?.({ stage: 'start', totalSources: SOURCE_CATALOG.length });
 
-    // Workspaces que vão receber ofertas
-    const workspaces = await prisma.workspace.findMany({
-      where: { autoApproveEnabled: true },
-    });
-    if (workspaces.length === 0) {
-      console.log('   ⚠️  Nenhum workspace com auto-aprovação ativa — pulando varredura');
-      return { totalScanned: 0, workspaces: 0 };
-    }
-
-    const affTag = await getAffiliateTag();
     let totalScanned = 0;
-    let totalSaved = 0;
+    let totalUpserted = 0;
     let i = 0;
 
-    // Varre cada fonte UMA vez (sequencialmente, pra não estressar ML)
+    // Etapa 1: scrape de cada fonte → upsert em ScrapedOffer
     for (const source of SOURCE_CATALOG) {
       i++;
-      // Por padrão, varre todas as páginas, mas em produção é razoável
-      // limitar a primeira chamada (10 páginas) pra acelerar. Override por env.
       const maxPages = Number(process.env.CATALOG_MAX_PAGES ?? source.pages);
 
       onProgress?.({
@@ -95,88 +236,16 @@ export async function runCatalogSweep(onProgress) {
       totalScanned += offers.length;
       console.log(`   ✅ [${source.label}] ${offers.length} ofertas únicas`);
 
-      // Enriquecimento
-      const enriched = offers.map((o) => {
+      // Enriquece + persiste em ScrapedOffer
+      for (const o of offers) {
         const categoryDetected = detectCategory(o.title);
         const commissionPct = commissionPctFor(categoryDetected);
-        const estimated = estimateCommission(o.price, categoryDetected);
-        return { ...o, categoryDetected, commissionPct, estimatedCommission: estimated };
-      });
-
-      // Distribui pra TODOS os workspaces com auto-aprovação ativa.
-      // Keywords + categoria detectada do título decidem se a oferta entra
-      // (filtro abaixo). Categoria da fonte (cellphones, fashion-f) é só
-      // metadata pra debug.
-      for (const ws of workspaces) {
-        let savedForWs = 0;
-        const cooldownMs = (ws.cooldownDays ?? 30) * 24 * 60 * 60 * 1000;
-        const cooldownDate = new Date(Date.now() - cooldownMs);
-
-        // Filtra por critérios do workspace
-        const filtered = enriched.filter((o) => {
-          if (o.discountPercent < (ws.minDiscount ?? 0)) return false;
-          if (ws.onlyFreeShipping && !o.freeShipping) return false;
-          if (ws.onlyDeals && !o.originalPrice) return false;
-          if (ws.priceMin != null && o.price < ws.priceMin) return false;
-          if (ws.priceMax != null && o.price > ws.priceMax) return false;
-          if (!matchKeywords(o, ws.keywords)) return false;
-          return true;
-        });
-
-        // Cooldown global por workspace
-        const productIds = filtered.map((o) => o.productId);
-        const recent = productIds.length > 0 ? await prisma.offer.findMany({
-          where: {
-            productId: { in: productIds },
-            workspaceId: ws.id,
-            createdAt: { gte: cooldownDate },
-          },
-          select: { productId: true },
-        }) : [];
-        const recentSet = new Set(recent.map((r) => r.productId));
-
-        for (const o of filtered) {
-          if (recentSet.has(o.productId)) continue;
-          const score = scoreOffer(o, {
-            estimatedCommission: o.estimatedCommission,
-            priceMin: ws.priceMin ?? 30,
-            priceMax: ws.priceMax ?? 500,
-          });
-          const affiliateUrl = attachAffiliateTag(o.permalink, affTag);
-          try {
-            await prisma.offer.create({
-              data: {
-                workspaceId: ws.id,
-                productId: o.productId,
-                title: o.title,
-                price: o.price,
-                originalPrice: o.originalPrice,
-                discountPercent: o.discountPercent,
-                currency: o.currency,
-                permalink: o.permalink,
-                affiliateUrl,
-                imageUrl: o.image,
-                freeShipping: o.freeShipping,
-                condition: o.condition,
-                soldQuantity: o.soldQuantity,
-                coupon: o.coupon ?? null,
-                highlight: o.highlight ?? null,
-                categoryDetected: o.categoryDetected,
-                commissionPct: o.commissionPct,
-                estimatedCommission: o.estimatedCommission,
-                score,
-                status: 'pending',
-              },
-            });
-            savedForWs++;
-            totalSaved++;
-          } catch {
-            // dup (workspaceId+productId)
-          }
-        }
-
-        if (savedForWs > 0) {
-          console.log(`      → [${ws.name}] +${savedForWs} ofertas salvas`);
+        const estimatedCommission = estimateCommission(o.price, categoryDetected);
+        try {
+          await upsertScrapedOffer({ ...o, categoryDetected, commissionPct, estimatedCommission }, source.id);
+          totalUpserted++;
+        } catch (e) {
+          console.warn(`      upsert ${o.productId} falhou:`, e.message);
         }
       }
 
@@ -189,21 +258,34 @@ export async function runCatalogSweep(onProgress) {
       });
     }
 
-    // Após scrape: pra cada workspace ativo, enfileira ofertas pra envio
+    // Etapa 2: distribui pros workspaces ativos
+    const workspaces = await prisma.workspace.findMany({
+      where: { autoApproveEnabled: true },
+    });
+    let totalSavedToOffers = 0;
     let totalEnqueued = 0;
     for (const ws of workspaces) {
       try {
+        const stats = await distributeToWorkspace(ws);
+        totalSavedToOffers += stats.saved;
+        if (stats.saved > 0) console.log(`   → [${ws.name}] +${stats.saved} ofertas salvas (${stats.passed} passaram filtros de ${stats.total})`);
+
         const r = await enqueueApprovedOffers(ws, 100);
         totalEnqueued += r.enqueued;
-        if (r.enqueued > 0) console.log(`   📅 [${ws.name}] ${r.enqueued} novas ofertas enfileiradas`);
+        if (r.enqueued > 0) console.log(`   📅 [${ws.name}] ${r.enqueued} enfileiradas`);
       } catch (e) {
-        console.warn(`   ❌ [${ws.name}] enqueue falhou:`, e.message);
+        console.warn(`   ❌ [${ws.name}] distribute falhou:`, e.message);
       }
     }
 
-    console.log(`\n✅ Varredura concluída: ${totalScanned} scaneadas, ${totalSaved} novas salvas, ${totalEnqueued} enfileiradas\n`);
-    onProgress?.({ stage: 'done', totalScanned, totalSaved, totalEnqueued });
-    return { totalScanned, totalSaved, totalEnqueued, workspaces: workspaces.length };
+    console.log(`\n✅ Varredura concluída: ${totalScanned} scaneadas, ${totalUpserted} no banco global, ${totalSavedToOffers} novas em workspaces, ${totalEnqueued} enfileiradas\n`);
+    onProgress?.({
+      stage: 'done',
+      totalScanned,
+      totalSaved: totalSavedToOffers,
+      totalEnqueued,
+    });
+    return { totalScanned, totalUpserted, totalSaved: totalSavedToOffers, totalEnqueued, workspaces: workspaces.length };
   } finally {
     sweepInFlight = false;
   }

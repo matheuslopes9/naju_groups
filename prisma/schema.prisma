@@ -53,6 +53,38 @@ model Workspace {
   @@map("workspaces")
 }
 
+// Snapshot global de TUDO que o catalog-worker scaneou.
+// Diferente de Offer (que é por workspace, já filtrada), ScrapedOffer guarda
+// a oferta raw uma única vez. Permite:
+//   - reprocessar com filtros novos sem revarrer o ML
+//   - estatísticas globais do funil (147 scaneadas → quantas em cada filtro)
+//   - dedup ao varrer (não salva 2× o mesmo MLB)
+model ScrapedOffer {
+  id            String   @id @default(cuid())
+  productId     String   @unique @map("product_id")
+  title         String
+  price         Float
+  originalPrice Float?   @map("original_price")
+  discountPercent Int    @default(0) @map("discount_percent")
+  currency      String   @default("BRL")
+  permalink     String
+  imageUrl      String   @map("image_url")
+  freeShipping  Boolean  @default(false) @map("free_shipping")
+  soldQuantity  Int      @default(0) @map("sold_quantity")
+  coupon        String?
+  highlight     String?
+  categoryDetected String? @map("category_detected")
+  commissionPct Float?   @map("commission_pct")
+  estimatedCommission Float? @map("estimated_commission")
+  sourceId      String?  @map("source_id") // qual fonte do catálogo trouxe
+  lastSeenAt    DateTime @default(now()) @map("last_seen_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([lastSeenAt])
+  @@index([sourceId])
+  @@map("scraped_offers")
+}
+
 // Fila de envio: ofertas auto-aprovadas que aguardam o slot agendado.
 // Sender daemon checa a cada 30s e dispara quando scheduledFor <= now
 // E hora atual está dentro da janela do workspace.

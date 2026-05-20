@@ -17,10 +17,12 @@ export default function OffersPanel({ ws }) {
   const [manualUrl, setManualUrl] = useState('');
   const [addingUrl, setAddingUrl] = useState(false);
   const [affSession, setAffSession] = useState(null);
+  const [filterStats, setFilterStats] = useState(null);
 
   useEffect(() => {
     api.affiliateSessionGet().then(setAffSession).catch(() => setAffSession({ status: 'unknown' }));
-  }, []);
+    api.filterStats(ws.id).then(setFilterStats).catch(() => {});
+  }, [ws.id]);
 
   async function load() {
     setLoading(true);
@@ -82,6 +84,8 @@ export default function OffersPanel({ ws }) {
 
   return (
     <div className="space-y-4">
+      <FilterStatsCard stats={filterStats} />
+
       {/* Adicionar oferta por URL manual */}
       <div className="card">
         <h3 className="font-semibold flex items-center gap-2 mb-2">
@@ -158,6 +162,39 @@ export default function OffersPanel({ ws }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function FilterStatsCard({ stats }) {
+  if (!stats || stats.total === 0) return null;
+  const { total, passed } = stats;
+  const pct = Math.round((passed / total) * 100);
+  const rejections = [
+    { label: 'Desconto baixo',          count: stats.rejectedByDiscount },
+    { label: 'Sem frete grátis',        count: stats.rejectedByFreeShipping },
+    { label: 'Sem preço riscado',       count: stats.rejectedByDeal },
+    { label: 'Preço abaixo do mínimo',  count: stats.rejectedByPriceMin },
+    { label: 'Preço acima do máximo',   count: stats.rejectedByPriceMax },
+    { label: 'Sem keyword no título',   count: stats.rejectedByKeywords },
+  ].filter((r) => r.count > 0).sort((a, b) => b.count - a.count);
+
+  return (
+    <div className="card !py-3">
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <span className="font-bold text-gradient text-lg">{passed}</span>
+        <span className="text-sm opacity-70">de {total} scaneadas passam seus filtros ({pct}%)</span>
+        {rejections.length > 0 && (
+          <details className="ml-auto text-xs opacity-70">
+            <summary className="cursor-pointer">por que as outras caíram?</summary>
+            <div className="mt-2 text-right space-y-0.5">
+              {rejections.map((r) => (
+                <div key={r.label}>{r.label}: <strong>{r.count}</strong></div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
     </div>
   );
 }

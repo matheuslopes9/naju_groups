@@ -7,7 +7,7 @@ import { fetchItemByUrl, listCatalogSources } from '../ml/scraper.js';
 import { attachAffiliateTag } from '../ml/affiliate.js';
 import { getAffiliateTag } from '../ml/oauth.js';
 import { NICHE_PRESETS, findNiche } from '../ml/niches.js';
-import { runCatalogSweep, getCatalogSweepStatus } from '../catalog-worker.js';
+import { runCatalogSweep, getCatalogSweepStatus, distributeToWorkspace, applyWorkspaceFilters } from '../catalog-worker.js';
 import { getQueueStats, listUpcoming, enqueueApprovedOffers } from '../queue.js';
 
 const router = Router();
@@ -406,6 +406,65 @@ router.post('/:id/queue/refill', async (req, res) => {
   if (!ws) return res.status(404).json({ error: 'workspace não existe' });
   const r = await enqueueApprovedOffers(ws, 100);
   res.json(r);
+});
+
+/**
+ * QUICK START: pega tudo que já foi scaneado, aplica filtros atuais do
+ * workspace, salva Offers + enfileira + ativa autoApprove.
+ *
+ * Não revarre o ML — usa o que já está em ScrapedOffer (varredura global de 6h).
+ * Body opcional: { activate: true } (default true) liga autoApproveEnabled.
+ */
+router.post('/:id/quick-start', async (req, res) => {
+  const ws = await prisma.workspace.findUnique({ where: { id: req.params.id } });
+  if (!ws) return res.status(404).json({ error: 'workspace não existe' });
+
+  const activate = req.body?.activate !== false;
+  let activated = false;
+  if (activate && !ws.autoApproveEnabled) {
+    await prisma.workspace.update({ where: { id: ws.id }, data: { autoApproveEnabled: true } });
+    ws.autoApproveEnabled = true;
+    activated = true;
+  }
+
+  // 1) reprocessa histórico scaneado com filtros atuais
+  const stats = await distributeToWorkspace(ws);
+
+  // 2) enfileira ofertas com score alto
+  const queue = await enqueueApprovedOffers(ws, 100);
+
+  audit('workspace.quick_start', {
+    entity: 'workspace', entityId: ws.id, workspaceId: ws.id,
+    payload: { ...stats, enqueued: queue.enqueued, activated },
+  });
+  res.json({ ...stats, enqueued: queue.enqueued, activated });
+});
+
+/**
+ * STATS DE FILTRO: aplica os filtros do workspace em todas as ScrapedOffer
+ * SEM persistir nada. Mostra o funil de descarte pra UI exibir
+ * "147 scaneadas → 35 aprovadas, descartadas por: …"
+ */
+router.get('/:id/filter-stats', async (req, res) => {
+  const ws = await prisma.workspace.findUnique({ where: { id: req.params.id } });
+  if (!ws) return res.status(404).json({ error: 'workspace não existe' });
+
+  const scraped = await prisma.scrapedOffer.findMany({
+    orderBy: { lastSeenAt: 'desc' },
+    take: 2000,
+  });
+  const normalized = scraped.map((s) => ({
+    productId: s.productId,
+    title: s.title,
+    price: s.price,
+    originalPrice: s.originalPrice,
+    discountPercent: s.discountPercent,
+    permalink: s.permalink,
+    freeShipping: s.freeShipping,
+    coupon: s.coupon,
+  }));
+  const { stats } = applyWorkspaceFilters(ws, normalized);
+  res.json(stats);
 });
 
 // Ofertas (inbox)

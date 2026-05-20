@@ -79,6 +79,10 @@ export const api = {
   queueCancel: (id, queueId) => request(`/api/workspaces/${id}/queue/cancel/${queueId}`, { method: 'POST' }),
   queueRefill: (id) => request(`/api/workspaces/${id}/queue/refill`, { method: 'POST' }),
 
+  // Quick start: reprocessa scrape histórico + enfileira + ativa bot
+  quickStart: (id) => request(`/api/workspaces/${id}/quick-start`, { method: 'POST', body: JSON.stringify({ activate: true }) }),
+  filterStats: (id) => request(`/api/workspaces/${id}/filter-stats`),
+
   resetOffers: (id, status = 'all') => request(`/api/workspaces/${id}/offers/reset?status=${status}`, { method: 'POST' }),
 
   // Offers

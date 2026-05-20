@@ -7,13 +7,14 @@ import WhatsAppPanel from '../components/WhatsAppPanel.jsx';
 import GroupsPanel from '../components/GroupsPanel.jsx';
 import ConfigPanel from '../components/ConfigPanel.jsx';
 import OffersPanel from '../components/OffersPanel.jsx';
+import QuickStartPanel from '../components/QuickStartPanel.jsx';
 import { Icon } from '../components/Icon.jsx';
 
 export default function WorkspaceDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [ws, setWs] = useState(null);
-  const [tab, setTab] = useState('overview');
+  const [tab, setTab] = useState('start');
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [draftNiche, setDraftNiche] = useState('');
@@ -60,11 +61,11 @@ export default function WorkspaceDetail() {
   }
 
   const tabs = [
-    { id: 'overview', label: 'Visão geral',  icon: Icon.Home },
+    { id: 'start',    label: 'Início',       icon: Icon.Zap },
+    { id: 'offers',   label: 'Ofertas',      icon: Icon.ShoppingBag },
     { id: 'whatsapp', label: 'WhatsApp',     icon: Icon.Phone },
     { id: 'groups',   label: 'Grupos',       icon: Icon.Users },
-    { id: 'config',   label: 'Configuração', icon: Icon.Settings },
-    { id: 'offers',   label: 'Ofertas',      icon: Icon.ShoppingBag },
+    { id: 'config',   label: 'Avançado',     icon: Icon.Settings },
   ];
 
   const status = ws.wa?.status ?? 'disconnected';
@@ -152,11 +153,11 @@ export default function WorkspaceDetail() {
         </div>
 
         <div className="animate-fade-in">
-          {tab === 'overview' && <OverviewTab ws={ws} />}
+          {tab === 'start'    && <QuickStartPanel ws={ws} reload={load} onGoAdvanced={() => setTab('config')} />}
+          {tab === 'offers'   && <OffersPanel ws={ws} reload={load} />}
           {tab === 'whatsapp' && <WhatsAppPanel ws={ws} reload={load} />}
           {tab === 'groups'   && <GroupsPanel ws={ws} reload={load} />}
-          {tab === 'config'  && <ConfigPanel ws={ws} reload={load} />}
-          {tab === 'offers'   && <OffersPanel ws={ws} reload={load} />}
+          {tab === 'config'   && <ConfigPanel ws={ws} reload={load} />}
         </div>
       </div>
     </Layout>
