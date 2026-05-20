@@ -26,6 +26,7 @@ export default function QuickStartPanel({ ws, reload, onGoAdvanced }) {
   const [priceMax, setPriceMax] = useState(ws.priceMax ?? 300);
   const [onlyFreeShipping, setOnlyFreeShipping] = useState(!!ws.onlyFreeShipping);
   const [onlyDeals, setOnlyDeals] = useState(!!ws.onlyDeals);
+  const [threshold, setThreshold] = useState(ws.autoApproveThreshold ?? 50);
   const [previewStats, setPreviewStats] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -38,7 +39,8 @@ export default function QuickStartPanel({ ws, reload, onGoAdvanced }) {
     setPriceMax(ws.priceMax ?? 300);
     setOnlyFreeShipping(!!ws.onlyFreeShipping);
     setOnlyDeals(!!ws.onlyDeals);
-  }, [ws.id, ws.minDiscount, ws.priceMin, ws.priceMax, ws.onlyFreeShipping, ws.onlyDeals]);
+    setThreshold(ws.autoApproveThreshold ?? 50);
+  }, [ws.id, ws.minDiscount, ws.priceMin, ws.priceMax, ws.onlyFreeShipping, ws.onlyDeals, ws.autoApproveThreshold]);
 
   useEffect(() => {
     api.queueStats(ws.id).then(setQueueStats).catch(() => {});
@@ -56,6 +58,7 @@ export default function QuickStartPanel({ ws, reload, onGoAdvanced }) {
         // atuais dos sliders, não os que estão no banco).
         await api.updateWorkspace(ws.id, {
           minDiscount, priceMin, priceMax, onlyFreeShipping, onlyDeals,
+          autoApproveThreshold: threshold,
         });
         const stats = await api.filterStats(ws.id);
         setPreviewStats(stats);
@@ -66,7 +69,7 @@ export default function QuickStartPanel({ ws, reload, onGoAdvanced }) {
       }
     }, 400);
     return () => clearTimeout(handle);
-  }, [minDiscount, priceMin, priceMax, onlyFreeShipping, onlyDeals, ws.id]);
+  }, [minDiscount, priceMin, priceMax, onlyFreeShipping, onlyDeals, threshold, ws.id]);
 
   async function start() {
     if (!ws.nichePreset) {
@@ -175,6 +178,26 @@ export default function QuickStartPanel({ ws, reload, onGoAdvanced }) {
         </div>
       </Section>
 
+      {/* PASSO 3: qualidade (score mínimo) */}
+      <Section
+        title="3. Quão exigente quer ser?"
+        helper="Score combina desconto + cupom + frete + comissão. Quanto mais alto, menos ofertas — mas só as melhores."
+      >
+        <Slider
+          label="Score mínimo pra entrar na fila"
+          value={threshold}
+          onChange={setThreshold}
+          min={0} max={100} step={5}
+          format={(v) => `≥ ${v}`}
+          hint={
+            threshold <= 30 ? 'Permissivo — quase tudo passa, inclusive ofertas mediocres' :
+            threshold <= 60 ? 'Equilibrado — boas ofertas com algum atrativo (cupom OU desconto alto)' :
+            threshold <= 80 ? 'Exigente — só ofertas top (desconto alto + cupom + frete + comissão boa)' :
+            'Muito restritivo — poucas ofertas vão atender'
+          }
+        />
+      </Section>
+
       {/* PREVIEW: funil em tempo real */}
       <PreviewCard stats={previewStats} loading={previewLoading} />
 
@@ -205,6 +228,7 @@ function PreviewCard({ stats, loading }) {
     { key: 'rejectedByPriceMin', label: 'Preço abaixo do mínimo', count: stats.rejectedByPriceMin },
     { key: 'rejectedByPriceMax', label: 'Preço acima do máximo', count: stats.rejectedByPriceMax },
     { key: 'rejectedByKeywords', label: 'Sem keyword no título', count: stats.rejectedByKeywords },
+    { key: 'rejectedByScore', label: 'Score abaixo do mínimo', count: stats.rejectedByScore ?? 0 },
   ].filter((r) => r.count > 0);
 
   return (

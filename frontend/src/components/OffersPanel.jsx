@@ -177,6 +177,7 @@ function FilterStatsCard({ stats }) {
     { label: 'Preço abaixo do mínimo',  count: stats.rejectedByPriceMin },
     { label: 'Preço acima do máximo',   count: stats.rejectedByPriceMax },
     { label: 'Sem keyword no título',   count: stats.rejectedByKeywords },
+    { label: 'Score abaixo do mínimo',  count: stats.rejectedByScore ?? 0 },
   ].filter((r) => r.count > 0).sort((a, b) => b.count - a.count);
 
   return (

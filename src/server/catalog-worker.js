@@ -159,14 +159,17 @@ export function applyWorkspaceFilters(ws, offers) {
   const stats = {
     total: offers.length,
     passed: 0,
+    passedScore: 0, // quantas das que passaram tambem batem o score threshold
     rejectedByDiscount: 0,
     rejectedByFreeShipping: 0,
     rejectedByDeal: 0,
     rejectedByPriceMin: 0,
     rejectedByPriceMax: 0,
     rejectedByKeywords: 0,
+    rejectedByScore: 0, // passou filtros mas score < threshold
   };
   const passed = [];
+  const threshold = ws.autoApproveThreshold ?? 50;
   for (const o of offers) {
     if (o.discountPercent < (ws.minDiscount ?? 0)) { stats.rejectedByDiscount++; continue; }
     if (ws.onlyFreeShipping && !o.freeShipping) { stats.rejectedByFreeShipping++; continue; }
@@ -174,7 +177,18 @@ export function applyWorkspaceFilters(ws, offers) {
     if (ws.priceMin != null && o.price < ws.priceMin) { stats.rejectedByPriceMin++; continue; }
     if (ws.priceMax != null && o.price > ws.priceMax) { stats.rejectedByPriceMax++; continue; }
     if (!matchKeywords(o, ws.keywords)) { stats.rejectedByKeywords++; continue; }
-    passed.push(o);
+    // Passou todos os filtros explicitos. Score decide se chega na fila.
+    const score = scoreOffer(o, {
+      estimatedCommission: o.estimatedCommission ?? 0,
+      priceMin: ws.priceMin ?? 30,
+      priceMax: ws.priceMax ?? 500,
+    });
+    if (score < threshold) {
+      stats.rejectedByScore++;
+      continue;
+    }
+    passed.push({ ...o, score });
+    stats.passedScore++;
   }
   stats.passed = passed.length;
   return { passed, stats };
@@ -236,11 +250,7 @@ export async function distributeToWorkspace(ws, opts = {}) {
   let saved = 0;
   for (const o of passed) {
     if (recentSet.has(o.productId)) continue;
-    const score = scoreOffer(o, {
-      estimatedCommission: o.estimatedCommission,
-      priceMin: ws.priceMin ?? 30,
-      priceMax: ws.priceMax ?? 500,
-    });
+    // o.score já vem calculado de applyWorkspaceFilters (única source of truth)
     const affiliateUrl = attachAffiliateTag(o.permalink, affTag);
     try {
       await prisma.offer.create({
@@ -262,7 +272,7 @@ export async function distributeToWorkspace(ws, opts = {}) {
           categoryDetected: o.categoryDetected,
           commissionPct: o.commissionPct,
           estimatedCommission: o.estimatedCommission,
-          score,
+          score: o.score,
           status: 'pending',
         },
       });
@@ -352,7 +362,7 @@ export async function runCatalogSweep(onProgress) {
         totalSavedToOffers += stats.saved;
         if (stats.saved > 0) console.log(`   → [${ws.name}] +${stats.saved} ofertas salvas (${stats.passed} passaram filtros de ${stats.total})`);
 
-        const r = await enqueueApprovedOffers(ws, 100);
+        const r = await enqueueApprovedOffers(ws, 500);
         totalEnqueued += r.enqueued;
         if (r.enqueued > 0) console.log(`   📅 [${ws.name}] ${r.enqueued} enfileiradas`);
       } catch (e) {

@@ -423,7 +423,7 @@ router.post('/:id/queue/cancel/:queueId', async (req, res) => {
 router.post('/:id/queue/refill', async (req, res) => {
   const ws = await prisma.workspace.findUnique({ where: { id: req.params.id } });
   if (!ws) return res.status(404).json({ error: 'workspace não existe' });
-  const r = await enqueueApprovedOffers(ws, 100);
+  const r = await enqueueApprovedOffers(ws, 500);
   res.json(r);
 });
 
@@ -450,7 +450,7 @@ router.post('/:id/quick-start', async (req, res) => {
   const stats = await distributeToWorkspace(ws);
 
   // 2) enfileira ofertas com score alto
-  const queue = await enqueueApprovedOffers(ws, 100);
+  const queue = await enqueueApprovedOffers(ws, 500);
 
   audit('workspace.quick_start', {
     entity: 'workspace', entityId: ws.id, workspaceId: ws.id,
@@ -481,6 +481,8 @@ router.get('/:id/filter-stats', async (req, res) => {
     permalink: s.permalink,
     freeShipping: s.freeShipping,
     coupon: s.coupon,
+    highlight: s.highlight,
+    estimatedCommission: s.estimatedCommission,
   }));
   const { stats } = applyWorkspaceFilters(ws, normalized);
   res.json(stats);

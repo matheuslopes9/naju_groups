@@ -35,7 +35,7 @@ model Workspace {
   typingSimulation Boolean @default(true) @map("typing_simulation")
   // Auto-aprovação (agente IA)
   autoApproveEnabled   Boolean @default(false) @map("auto_approve_enabled")
-  autoApproveThreshold Int     @default(80) @map("auto_approve_threshold")
+  autoApproveThreshold Int     @default(50) @map("auto_approve_threshold")
   autoApproveMaxDaily  Int     @default(10) @map("auto_approve_max_daily")
   // Janela de envio diário (formato "HH:MM-HH:MM", default 08:00-22:00)
   sendWindowStart      String  @default("08:00") @map("send_window_start")

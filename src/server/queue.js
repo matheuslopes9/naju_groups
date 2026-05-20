@@ -126,7 +126,7 @@ function shuffleInPlace(arr) {
  * (round-robin com buckets shuffled) pra evitar repetição do mesmo nicho
  * de produto consecutivamente, e cria QueuedSend pra cada uma.
  */
-export async function enqueueApprovedOffers(ws, maxToQueue = 50) {
+export async function enqueueApprovedOffers(ws, maxToQueue = 500) {
   if (!ws.autoApproveEnabled) return { enqueued: 0 };
 
   // Ofertas pending com score alto que ainda não estão na fila
