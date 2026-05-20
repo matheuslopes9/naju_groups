@@ -81,6 +81,9 @@ export const api = {
   quickStart: (id) => request(`/api/workspaces/${id}/quick-start`, { method: 'POST', body: JSON.stringify({ activate: true }) }),
   filterStats: (id) => request(`/api/workspaces/${id}/filter-stats`),
 
+  // System: reset total (apaga scrape + ofertas + fila + agent logs)
+  systemReset: () => request('/api/system/reset', { method: 'POST' }),
+
   resetOffers: (id, status = 'all') => request(`/api/workspaces/${id}/offers/reset?status=${status}`, { method: 'POST' }),
 
   // Offers

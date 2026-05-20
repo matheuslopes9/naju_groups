@@ -16,6 +16,7 @@ import mlRouter from './routes/ml.js';
 import mlPublicRouter from './routes/ml-public.js';
 import auditRouter from './routes/audit.js';
 import affiliateRouter from './routes/affiliate.js';
+import systemRouter from './routes/system.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIST = path.resolve(__dirname, '../../frontend/dist');
@@ -24,7 +25,7 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
-const BUILD_TAG = 'v2.3-pagination-shuffle-2026-05-20';
+const BUILD_TAG = 'v2.4-reset-2026-05-20';
 
 // API pública
 app.get('/healthz', (_req, res) => res.json({ ok: true, build: BUILD_TAG }));
@@ -41,6 +42,7 @@ app.use('/api/ml', authMiddleware, mlRouter);
 app.use('/api/workspaces', authMiddleware, workspacesRouter);
 app.use('/api/audit', authMiddleware, auditRouter);
 app.use('/api/affiliate', authMiddleware, affiliateRouter);
+app.use('/api/system', authMiddleware, systemRouter);
 
 // Servir frontend build (em produção). Em dev rode `npm run frontend:dev` separado.
 if (fs.existsSync(FRONTEND_DIST)) {

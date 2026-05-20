@@ -185,8 +185,59 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        {/* Zona de perigo */}
+        {hasWorkspaces && <DangerZone onReset={load} />}
       </div>
     </Layout>
+  );
+}
+
+function DangerZone({ onReset }) {
+  const [busy, setBusy] = useState(false);
+
+  async function doReset() {
+    const phrase = 'RESET';
+    const typed = prompt(
+      `Isso vai APAGAR todas as ofertas, fila de envio, histórico de scrape e logs do agente.\n\n` +
+      `Preserva: workspaces, configurações, grupos, WhatsApp pareado, sessão ML afiliado.\n\n` +
+      `Digite "${phrase}" pra confirmar:`
+    );
+    if (typed !== phrase) {
+      if (typed != null) toast.info('Cancelado (texto não confere)');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.systemReset();
+      const total = (r.deleted?.scrapedOffers ?? 0) + (r.deleted?.offers ?? 0) + (r.deleted?.queuedSends ?? 0) + (r.deleted?.agentActions ?? 0);
+      toast.success(`Reset: ${total} registros apagados`);
+      onReset?.();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="mt-8 pt-6 border-t opacity-70 hover:opacity-100 transition" style={{ borderColor: 'rgb(var(--border))' }}>
+      <details className="text-sm">
+        <summary className="cursor-pointer opacity-60 hover:opacity-100">⚠️ Zona de perigo</summary>
+        <div className="mt-3 p-4 rounded-lg space-y-3" style={{ background: 'rgba(244,63,94,0.06)', borderLeft: '3px solid rgba(244,63,94,0.4)' }}>
+          <div>
+            <div className="text-sm font-medium text-rose-300">Reset total do sistema</div>
+            <p className="text-xs mt-1 opacity-80">
+              Apaga todas as ofertas scaneadas, ofertas filtradas, fila de envio e logs do agente.
+              Workspaces, configurações, grupos e WhatsApp não são afetados.
+            </p>
+          </div>
+          <button onClick={doReset} disabled={busy}
+            className="btn !text-xs !py-1.5 !px-3 text-rose-300 hover:bg-rose-500/10"
+            style={{ background: 'rgba(244,63,94,0.1)' }}>
+            {busy ? <Icon.Loader width={12} height={12} /> : <Icon.Trash width={12} height={12} />}
+            {busy ? 'Apagando…' : 'Apagar tudo e começar do zero'}
+          </button>
+        </div>
+      </details>
+    </div>
   );
 }
 
