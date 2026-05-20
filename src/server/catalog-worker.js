@@ -1,5 +1,6 @@
 /**
- * Catalog worker: varre as 15 fontes do ML a cada 6h.
+ * Catalog worker: varre as 15 fontes do ML em horários fixos de Brasília:
+ *   00h, 06h, 12h, 18h (America/Sao_Paulo, UTC-3 fixo).
  *
  * Arquitetura em 2 etapas:
  *   1. SCRAPE → salva em ScrapedOffer (snapshot global, dedup por productId)
@@ -8,6 +9,10 @@
  *
  * A separação permite "Reprocessar" sem revarrer o ML: a rota quick-start
  * chama distributeToWorkspace() direto, usando o que já tem em ScrapedOffer.
+ *
+ * Catch-up: se o servidor sobe num horário entre slots e o último slot
+ * (a até 6h atrás) ainda não foi varrido, dispara imediatamente pra
+ * recuperar o atraso.
  */
 import { prisma } from './db.js';
 import { SOURCE_CATALOG } from './ml/sources-catalog.js';
@@ -17,19 +22,96 @@ import { getAffiliateTag } from './ml/oauth.js';
 import { detectCategory, commissionPctFor, estimateCommission } from './ml/commission.js';
 import { enqueueApprovedOffers } from './queue.js';
 
-const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
+// Slots de varredura em horário de Brasília (UTC-3 fixo, sem DST desde 2019)
+const SLOT_HOURS_BR = [0, 6, 12, 18];
+const SP_OFFSET_MIN = -180; // UTC-3
+
 let lastSweepAt = 0;
 let sweepInFlight = false;
 
+/**
+ * Converte um Date UTC pra { hour, dayShift } em horário de Brasília.
+ * dayShift = -1 se rolar pro dia anterior em SP, 0 mesmo dia, +1 próximo.
+ */
+function toSP(date) {
+  const utcMs = date.getTime();
+  const spMs = utcMs + SP_OFFSET_MIN * 60_000;
+  return new Date(spMs);
+}
+
+/**
+ * Retorna o Date UTC do próximo slot a partir do "now" (Date UTC).
+ * Ex: now=10:30 BRT → próximo é 12:00 BRT.
+ */
+function nextSlotAfter(now = new Date()) {
+  const sp = toSP(now);
+  const spHour = sp.getUTCHours();
+  const spMin = sp.getUTCMinutes();
+  // Próximo slot estritamente maior que (hora:min) atual em SP
+  let nextHour = SLOT_HOURS_BR.find((h) => h > spHour || (h === spHour && 0 > spMin));
+  let dayShift = 0;
+  if (nextHour == null) {
+    nextHour = SLOT_HOURS_BR[0];
+    dayShift = 1;
+  }
+  // Constrói Date UTC: SP é UTC-3 → UTC = SP + 3
+  const target = new Date(Date.UTC(
+    sp.getUTCFullYear(),
+    sp.getUTCMonth(),
+    sp.getUTCDate() + dayShift,
+    nextHour - SP_OFFSET_MIN / 60, // nextHour - (-3) = nextHour + 3 (UTC)
+    0, 0, 0,
+  ));
+  return target;
+}
+
+/**
+ * Retorna o Date UTC do slot ANTERIOR mais recente (≤ now).
+ * Usado pra detectar se há slot perdido (catch-up).
+ */
+function previousSlot(now = new Date()) {
+  const sp = toSP(now);
+  const spHour = sp.getUTCHours();
+  let prevHour = [...SLOT_HOURS_BR].reverse().find((h) => h <= spHour);
+  let dayShift = 0;
+  if (prevHour == null) {
+    prevHour = SLOT_HOURS_BR[SLOT_HOURS_BR.length - 1];
+    dayShift = -1;
+  }
+  return new Date(Date.UTC(
+    sp.getUTCFullYear(),
+    sp.getUTCMonth(),
+    sp.getUTCDate() + dayShift,
+    prevHour - SP_OFFSET_MIN / 60,
+    0, 0, 0,
+  ));
+}
+
 export function startCatalogWorker() {
-  setTimeout(() => runCatalogSweep().catch((e) => console.warn('catalog sweep err:', e.message)), 60_000);
-  setInterval(() => {
-    const elapsed = Date.now() - lastSweepAt;
-    if (elapsed >= SWEEP_INTERVAL_MS && !sweepInFlight) {
+  scheduleNextSlot();
+  // Catch-up: se subiu e o último slot ainda não rolou, varre logo
+  setTimeout(() => {
+    const prev = previousSlot();
+    if (lastSweepAt < prev.getTime()) {
+      console.log(`🌐 Catch-up: último slot foi ${prev.toISOString()}, varrendo agora`);
       runCatalogSweep().catch((e) => console.warn('catalog sweep err:', e.message));
     }
-  }, 30 * 60 * 1000);
-  console.log('🌐 Catalog worker iniciado — varredura a cada 6h');
+  }, 60_000);
+  console.log('🌐 Catalog worker iniciado — slots fixos: 00h/06h/12h/18h (Brasília)');
+}
+
+function scheduleNextSlot() {
+  const next = nextSlotAfter();
+  const delay = Math.max(1000, next.getTime() - Date.now());
+  console.log(`📅 Próxima varredura agendada: ${next.toISOString()} (em ${Math.round(delay / 60000)} min)`);
+  setTimeout(async () => {
+    try {
+      await runCatalogSweep();
+    } catch (e) {
+      console.warn('catalog sweep err:', e.message);
+    }
+    scheduleNextSlot(); // reagenda pro próximo
+  }, delay);
 }
 
 /**
@@ -294,7 +376,9 @@ export async function runCatalogSweep(onProgress) {
 export function getCatalogSweepStatus() {
   return {
     lastSweepAt: lastSweepAt ? new Date(lastSweepAt).toISOString() : null,
-    nextSweepAt: lastSweepAt ? new Date(lastSweepAt + SWEEP_INTERVAL_MS).toISOString() : null,
+    nextSweepAt: nextSlotAfter().toISOString(),
     inFlight: sweepInFlight,
+    slots: SLOT_HOURS_BR.map((h) => `${String(h).padStart(2, '0')}:00`),
+    timezone: 'America/Sao_Paulo',
   };
 }

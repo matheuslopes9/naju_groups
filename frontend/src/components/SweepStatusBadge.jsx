@@ -46,12 +46,17 @@ export default function SweepStatusBadge({ onTrigger }) {
   }
 
   const last = status?.lastSweepAt ? new Date(status.lastSweepAt) : null;
+  const next = status?.nextSweepAt ? new Date(status.nextSweepAt) : null;
   const ago = last ? humanAgo(last) : 'nunca';
+  const nextStr = next ? humanNext(next) : null;
   const inFlight = status?.inFlight || sweeping;
 
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="opacity-70">Varredura ML: <strong>{ago}</strong></span>
+    <div className="flex items-center gap-2 text-xs flex-wrap">
+      <span className="opacity-70">
+        Varredura: <strong>{ago}</strong>
+        {nextStr && <> · próxima <strong>{nextStr}</strong></>}
+      </span>
       <button
         onClick={startSweep}
         disabled={inFlight}
@@ -71,4 +76,14 @@ function humanAgo(date) {
   if (diff < 3600) return `${Math.floor(diff / 60)} min atrás`;
   if (diff < 86400) return `${Math.floor(diff / 3600)} h atrás`;
   return `${Math.floor(diff / 86400)} d atrás`;
+}
+
+function humanNext(date) {
+  const diff = (date.getTime() - Date.now()) / 1000;
+  // formato HH:MM no fuso local (servidor manda UTC ISO, browser converte)
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  if (diff < 3600) return `às ${hh}:${mm} (em ${Math.max(1, Math.floor(diff / 60))}min)`;
+  if (diff < 86400) return `às ${hh}:${mm}`;
+  return `${hh}:${mm} amanhã`;
 }
