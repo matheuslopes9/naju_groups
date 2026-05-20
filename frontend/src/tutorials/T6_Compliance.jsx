@@ -52,11 +52,15 @@ export default function T6_Compliance() {
       <Step n={4} title="CONAR: identificação como publicidade">
         <p>
           <strong>5.1</strong>: toda divulgação tem que ser identificada como publicidade.
-          O sistema inclui <code>#publi</code> automaticamente em todas as mensagens.
+          <strong> O sistema NÃO inclui tag automática</strong> — você assume essa
+          responsabilidade no nome do grupo, descrição ou mensagens.
         </p>
-        <Callout tone="info" title="Outras tags válidas">
+        <Callout tone="warn" title="Risco se omitir">
           <code>#publi</code>, <code>#ad</code>, <code>#publicidade</code>,
-          <code>#parceriapaga</code> são todas reconhecidas pelo CONAR. Use pelo menos uma.
+          <code>#parceriapaga</code> são todas reconhecidas pelo CONAR. Use pelo menos uma
+          em algum lugar (nome do grupo, descrição, ou edite o footer dos anúncios em
+          <code>src/server/formatter.js</code>). Sem identificação, multa do CONAR pode chegar
+          a R$ 50k+ por infração reincidente.
         </Callout>
       </Step>
 
@@ -111,8 +115,8 @@ export default function T6_Compliance() {
 
       <Callout tone="success" title="Você está pronto">
         Sabendo tudo isso, é só consistência: revisar ofertas com critério, cadastrar
-        mídias no portal, manter <code>#publi</code> e nunca exagerar no volume.
-        Boa sorte 💜
+        mídias no portal, identificar publicidade no nome/descrição do grupo e nunca
+        exagerar no volume. Boa sorte 💜
       </Callout>
     </StepsList>
   );

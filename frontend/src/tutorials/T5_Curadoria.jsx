@@ -62,7 +62,7 @@ export default function T5_Curadoria() {
         <ol className="list-decimal pl-5 space-y-1">
           <li>Marca a oferta como <code>sent</code> no banco</li>
           <li>Pra cada grupo de staging cadastrado: envia uma mensagem com foto + caption</li>
-          <li>A caption tem: emoji 🔥, título, preço, desconto, frete, link com tag de afiliada, <code>#publi</code></li>
+          <li>A caption tem: emoji 🔥, título, preço, desconto, frete, link com tag de afiliada e alerta "preço pode mudar"</li>
           <li>Registra a ação no audit log</li>
         </ol>
       </Step>

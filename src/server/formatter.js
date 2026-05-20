@@ -45,7 +45,7 @@ function formatCompact(offer, nicheId) {
   lines.push(`🛒 ${offer.affiliateUrl ?? offer.permalink}`);
   lines.push('');
   lines.push(`_${closer}_`);
-  lines.push('_#publi · oferta sujeita a alteração_');
+  lines.push('_⚠️ Preço pode mudar a qualquer momento!_');
 
   return lines.join('\n');
 }
@@ -85,7 +85,7 @@ function formatRich(offer, nicheId) {
   lines.push(`🛒 ${offer.affiliateUrl ?? offer.permalink}`);
   lines.push('');
   lines.push(`_${closer}_`);
-  lines.push('_#publi · preço pode mudar a qualquer momento_');
+  lines.push('_⚠️ Preço pode mudar a qualquer momento!_');
 
   return lines.join('\n');
 }
