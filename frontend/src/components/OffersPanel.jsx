@@ -10,9 +10,14 @@ const TABS = [
   { id: 'rejected', label: 'Rejeitadas', icon: Icon.X },
 ];
 
+const PAGE_SIZE = 20;
+
 export default function OffersPanel({ ws }) {
   const [tab, setTab] = useState('pending');
   const [offers, setOffers] = useState([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [manualUrl, setManualUrl] = useState('');
   const [addingUrl, setAddingUrl] = useState(false);
@@ -26,10 +31,18 @@ export default function OffersPanel({ ws }) {
 
   async function load() {
     setLoading(true);
-    try { setOffers(await api.listOffers(ws.id, tab)); }
+    try {
+      const r = await api.listOffers(ws.id, tab, page, PAGE_SIZE);
+      setOffers(r.items ?? r); // compat caso backend antigo retorne array puro
+      setTotal(r.total ?? (Array.isArray(r) ? r.length : 0));
+      setTotalPages(r.totalPages ?? 1);
+    }
     finally { setLoading(false); }
   }
-  useEffect(() => { load(); }, [ws.id, tab]);
+  useEffect(() => { load(); }, [ws.id, tab, page]);
+
+  // Reseta página ao trocar de tab
+  useEffect(() => { setPage(1); }, [tab, ws.id]);
 
   async function addByUrl() {
     if (!manualUrl.trim()) return;
@@ -152,15 +165,18 @@ export default function OffersPanel({ ws }) {
           )}
         </div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger">
-          {offers.map((o) => (
-            <OfferCard key={o.id} offer={o} tab={tab}
-              affSessionConnected={affSession?.status === 'connected'}
-              onApprove={() => { console.log('[click] Aprovar', o.id); approve(o.id); }}
-              onReject={() => reject(o.id)}
-              onSetShortlink={(sl) => setShortlink(o.id, sl)} />
-          ))}
-        </div>
+        <>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger">
+            {offers.map((o) => (
+              <OfferCard key={o.id} offer={o} tab={tab}
+                affSessionConnected={affSession?.status === 'connected'}
+                onApprove={() => { console.log('[click] Aprovar', o.id); approve(o.id); }}
+                onReject={() => reject(o.id)}
+                onSetShortlink={(sl) => setShortlink(o.id, sl)} />
+            ))}
+          </div>
+          <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onChange={setPage} />
+        </>
       )}
     </div>
   );
@@ -195,6 +211,62 @@ function FilterStatsCard({ stats }) {
             </div>
           </details>
         )}
+      </div>
+    </div>
+  );
+}
+
+function Pagination({ page, totalPages, total, pageSize, onChange }) {
+  if (totalPages <= 1) return null;
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+
+  // Mostra páginas próximas: 1, ..., page-1, page, page+1, ..., last
+  const pagesToShow = new Set([1, totalPages, page - 1, page, page + 1]);
+  const visible = [...pagesToShow].filter((p) => p >= 1 && p <= totalPages).sort((a, b) => a - b);
+  const items = [];
+  let lastP = 0;
+  for (const p of visible) {
+    if (p - lastP > 1) items.push('ellipsis-' + p);
+    items.push(p);
+    lastP = p;
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 mt-6 flex-wrap">
+      <div className="text-xs opacity-60">
+        Mostrando <strong>{from}–{to}</strong> de <strong>{total}</strong>
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onChange(page - 1)}
+          disabled={page <= 1}
+          className="btn btn-ghost !py-1 !px-2 !text-xs"
+        >
+          <Icon.ChevronLeft width={14} height={14} />
+        </button>
+        {items.map((p) =>
+          typeof p === 'string' ? (
+            <span key={p} className="px-2 opacity-50 text-xs">…</span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => onChange(p)}
+              className={`!py-1 !px-2.5 !text-xs rounded ${
+                p === page ? 'bg-gradient-brand text-white' : 'hover:bg-white/5'
+              }`}
+            >
+              {p}
+            </button>
+          )
+        )}
+        <button
+          onClick={() => onChange(page + 1)}
+          disabled={page >= totalPages}
+          className="btn btn-ghost !py-1 !px-2 !text-xs"
+        >
+          <Icon.ChevronRight width={14} height={14} />
+        </button>
       </div>
     </div>
   );

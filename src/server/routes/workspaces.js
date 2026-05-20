@@ -518,15 +518,23 @@ router.get('/:id/filter-stats', async (req, res) => {
   res.json(stats);
 });
 
-// Ofertas (inbox)
+// Ofertas (inbox) com paginação
+// Query: ?status=pending|sent|rejected & ?page=1 & ?pageSize=20
 router.get('/:id/offers', async (req, res) => {
-  const status = req.query.status ?? 'pending';
-  const offers = await prisma.offer.findMany({
-    where: { workspaceId: req.params.id, status: String(status) },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
-  });
-  res.json(offers);
+  const status = String(req.query.status ?? 'pending');
+  const page = Math.max(1, Number(req.query.page ?? 1));
+  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize ?? 20)));
+  const where = { workspaceId: req.params.id, status };
+  const [total, items] = await Promise.all([
+    prisma.offer.count({ where }),
+    prisma.offer.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+  res.json({ items, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 });
 
 // Salvar shortlink oficial (gerado pelo usuário no portal)

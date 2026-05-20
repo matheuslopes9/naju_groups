@@ -342,35 +342,53 @@ async function fetchItemByScraping(url) {
 }
 
 /**
- * Calcula score de atratividade (0-100) usando RENTABILIDADE como métrica principal.
+ * Calcula score de atratividade (0-100) usando RENTABILIDADE + POPULARIDADE
+ * como métricas principais.
  *
  * Pesos:
- *   - Comissão estimada (R$): 0-40 pts  (ofertas que rendem mais ganham mais)
- *   - Desconto %: 0-25 pts             (incentivo de conversão)
- *   - Cupom: +15 pts                   (selo "use cupom" tem alta conversão)
- *   - Selo destacado: +10 pts          (oferta do dia, queima)
- *   - Frete grátis: +10 pts
+ *   - Comissão estimada (R$): 0-35 pts (ofertas que rendem mais ganham mais)
+ *   - Desconto %: 0-20 pts            (incentivo de conversão)
+ *   - Vendas (soldQuantity): 0-20 pts (best-sellers sobem)
+ *   - Cupom: +12 pts                  (selo "use cupom" tem alta conversão)
+ *   - Frete grátis: +8 pts
+ *   - Selo destacado: +5 pts          (oferta do dia, queima)
+ *
+ * Total máximo teórico: 100. Faixa típica: 30-80.
  */
 export function scoreOffer(o, opts = {}) {
   const { estimatedCommission = 0, priceMin = 30, priceMax = 500 } = opts;
   let score = 0;
 
-  // Rentabilidade: comissão estimada vira pontos. Curva: 0=0pts, R$5=20pts, R$15+=40pts
-  if (estimatedCommission >= 15) score += 40;
-  else if (estimatedCommission >= 5) score += 20 + Math.round((estimatedCommission - 5) * 2);
-  else score += Math.round(estimatedCommission * 4);
+  // Rentabilidade: comissão estimada vira pontos. Curva: 0=0pts, R$5=18pts, R$15+=35pts
+  if (estimatedCommission >= 15) score += 35;
+  else if (estimatedCommission >= 5) score += 18 + Math.round((estimatedCommission - 5) * 1.7);
+  else score += Math.round(estimatedCommission * 3.6);
 
-  // Desconto: 0-25 pts (50% off = 25 pts)
-  score += Math.min(25, Math.round(o.discountPercent * 0.5));
+  // Desconto: 0-20 pts (50% off = 20 pts)
+  score += Math.min(20, Math.round(o.discountPercent * 0.4));
 
-  // Cupom: +15 pts
-  if (o.coupon) score += 15;
+  // Vendas: 0-20 pts (curva logaritmica — ML mostra "X vendidos" no card)
+  //   100+   = +8
+  //   500+   = +12
+  //   1000+  = +15
+  //   5000+  = +18
+  //   10000+ = +20
+  const sold = o.soldQuantity ?? 0;
+  if      (sold >= 10000) score += 20;
+  else if (sold >= 5000)  score += 18;
+  else if (sold >= 1000)  score += 15;
+  else if (sold >= 500)   score += 12;
+  else if (sold >= 100)   score += 8;
+  else if (sold >= 50)    score += 4;
 
-  // Selo destacado: +10 pts
-  if (o.highlight) score += 10;
+  // Cupom: +12 pts
+  if (o.coupon) score += 12;
 
-  // Frete grátis: +10 pts
-  if (o.freeShipping) score += 10;
+  // Frete grátis: +8 pts
+  if (o.freeShipping) score += 8;
+
+  // Selo destacado: +5 pts
+  if (o.highlight) score += 5;
 
   // Penalidade levíssima fora da faixa de preço (mantém ofertas premium acessíveis)
   if (o.price < priceMin || o.price > priceMax) score -= 5;

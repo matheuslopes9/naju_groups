@@ -91,9 +91,10 @@ function interleaveByCategory(offers) {
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key).push(o);
   }
-  // Score desc dentro de cada bucket
-  for (const arr of buckets.values()) {
-    arr.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  // Shuffle ponderado por score² dentro de cada bucket — top ofertas vem
+  // primeiro mais frequentemente, mas a ordem exata varia entre rebatches.
+  for (const [key, arr] of buckets.entries()) {
+    buckets.set(key, weightedShuffle(arr));
   }
 
   const result = [];
@@ -117,6 +118,30 @@ function shuffleInPlace(arr) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+/**
+ * Weighted shuffle — embaralha um array dando peso proporcional a score².
+ * Itens com score alto têm mais chance de vir nas primeiras posições, mas
+ * a ordem exata muda entre execuções.
+ *
+ * Algoritmo: "weighted reservoir sampling" via key = -log(random())/weight,
+ * ordena por key asc. Resultado: itens com weight alto tendem a key baixa
+ * (vem primeiro), mas com variação aleatória.
+ *
+ * Usa score² pra penalizar score baixo mais fortemente — diferença entre
+ * score 80 e 60 vira 6400 vs 3600 (1.78×), em vez de 1.33×.
+ */
+function weightedShuffle(items) {
+  return items
+    .map((item) => {
+      const weight = Math.max(1, (item.score ?? 50) ** 2);
+      // -log(u)/w é distribuição exponencial. Menor key = sai primeiro.
+      const key = -Math.log(1 - Math.random()) / weight;
+      return { item, key };
+    })
+    .sort((a, b) => a.key - b.key)
+    .map((x) => x.item);
 }
 
 /**
