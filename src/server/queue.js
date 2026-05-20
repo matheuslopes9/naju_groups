@@ -76,9 +76,55 @@ export async function computeNextSlot(ws, fromDate = new Date()) {
 }
 
 /**
+ * Round-robin entre buckets — tira 1 de cada bucket em rodízio até esvaziar.
+ * Buckets que ficam vazios são removidos do rodízio. Ordem dos buckets é
+ * embaralhada a cada nova rodada pra evitar viés sempre na mesma sequência.
+ *
+ * Ex: { beauty: [a,b,c], tech: [d,e], home: [f] }
+ *     → a, d, f, b, e, c
+ */
+function interleaveByCategory(offers) {
+  if (offers.length === 0) return [];
+  const buckets = new Map();
+  for (const o of offers) {
+    const key = o.categoryDetected || 'other';
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(o);
+  }
+  // Score desc dentro de cada bucket
+  for (const arr of buckets.values()) {
+    arr.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  }
+
+  const result = [];
+  while (buckets.size > 0) {
+    // Embaralha ordem dos buckets a cada rodada (pra não ser sempre
+    // beauty→tech→home repetindo)
+    const keys = shuffleInPlace([...buckets.keys()]);
+    for (const k of keys) {
+      const arr = buckets.get(k);
+      const next = arr.shift();
+      if (next) result.push(next);
+      if (arr.length === 0) buckets.delete(k);
+    }
+  }
+  return result;
+}
+
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/**
  * Enfileira ofertas auto-aprovadas pra envio agendado.
- * Pega até maxToQueue ofertas pending com score >= threshold,
- * ainda não enfileiradas, e cria QueuedSend pra cada uma.
+ *
+ * Pega ofertas pending com score >= threshold, intercala por categoria
+ * (round-robin com buckets shuffled) pra evitar repetição do mesmo nicho
+ * de produto consecutivamente, e cria QueuedSend pra cada uma.
  */
 export async function enqueueApprovedOffers(ws, maxToQueue = 50) {
   if (!ws.autoApproveEnabled) return { enqueued: 0 };
@@ -90,6 +136,7 @@ export async function enqueueApprovedOffers(ws, maxToQueue = 50) {
   });
   const inQueue = new Set(existing.map((q) => q.offerId));
 
+  // Puxa o dobro do max pra ter folga depois do round-robin
   const candidates = await prisma.offer.findMany({
     where: {
       workspaceId: ws.id,
@@ -97,14 +144,43 @@ export async function enqueueApprovedOffers(ws, maxToQueue = 50) {
       score: { gte: ws.autoApproveThreshold },
     },
     orderBy: [{ score: 'desc' }, { createdAt: 'asc' }],
-    take: maxToQueue * 2, // pega o dobro pra ter folga pós-filtro
+    take: maxToQueue * 3,
   });
 
-  let enqueued = 0;
-  for (const offer of candidates) {
-    if (enqueued >= maxToQueue) break;
-    if (inQueue.has(offer.id)) continue;
+  // Filtra os que já estão na fila e intercala por categoria
+  const available = candidates.filter((o) => !inQueue.has(o.id));
+  const ordered = interleaveByCategory(available);
 
+  // Mantém também histórico recente de categorias enviadas pra evitar
+  // que o primeiro item da fila seja da mesma categoria do ÚLTIMO enviado.
+  // Isso suaviza a transição entre rebatches.
+  const lastSent = await prisma.queuedSend.findFirst({
+    where: { workspaceId: ws.id, status: 'sent' },
+    orderBy: { sentAt: 'desc' },
+    include: {
+      // não tem relation pra Offer — busco por offerId depois
+    },
+  });
+  let lastCategory = null;
+  if (lastSent) {
+    const lastOffer = await prisma.offer.findUnique({
+      where: { id: lastSent.offerId },
+      select: { categoryDetected: true },
+    });
+    lastCategory = lastOffer?.categoryDetected ?? null;
+  }
+  // Se o primeiro item da fila for da mesma categoria do último enviado,
+  // troca com algum outro item de categoria diferente das próximas posições
+  if (lastCategory && ordered.length > 1 && ordered[0].categoryDetected === lastCategory) {
+    const swapIdx = ordered.findIndex((o, i) => i > 0 && o.categoryDetected !== lastCategory);
+    if (swapIdx > 0) {
+      [ordered[0], ordered[swapIdx]] = [ordered[swapIdx], ordered[0]];
+    }
+  }
+
+  let enqueued = 0;
+  for (const offer of ordered) {
+    if (enqueued >= maxToQueue) break;
     const slot = await computeNextSlot(ws);
     try {
       await prisma.queuedSend.create({
