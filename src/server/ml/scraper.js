@@ -19,6 +19,8 @@
  *   - Delay aleatório 1.5-3s entre páginas
  */
 import * as cheerio from 'cheerio';
+import { scrapeUrl } from './scraper-listing.js';
+import { SOURCE_CATALOG, findSourceById, buildPageUrl } from './sources-catalog.js';
 
 const BASE_URL = 'https://www.mercadolivre.com.br';
 
@@ -41,12 +43,74 @@ function delay(min = 1500, max = 3000) {
  * Fontes válidas (URLs do ML que retornam HTML com produtos).
  * Validadas empiricamente — outros slugs redirecionam pra /ofertas.
  */
+/**
+ * Fontes legadas (slug → URL fixa em /ofertas/<slug>).
+ * Mantidas pra compat com workspace_sources existentes.
+ * NOVAS fontes usam SOURCE_CATALOG em sources-catalog.js.
+ */
 export const AVAILABLE_SOURCES = [
   { slug: '',             label: 'Ofertas Gerais',       paginated: true,  defaultPages: 5 },
   { slug: 'supermercado', label: 'Supermercado',         paginated: false, defaultPages: 1 },
   { slug: 'informatica',  label: 'Informática',          paginated: false, defaultPages: 1 },
   { slug: 'digitais',     label: 'Jogos Digitais',       paginated: false, defaultPages: 1 },
 ];
+
+/**
+ * Lista exposta pra UI: tudo do catálogo novo.
+ */
+export function listCatalogSources() {
+  return SOURCE_CATALOG.map((s) => ({
+    id: s.id,
+    label: s.label,
+    pages: s.pages,
+    method: s.method,
+    category: s.category,
+  }));
+}
+
+/**
+ * Faz scraping de uma fonte do catálogo (por id) com paginação.
+ * Usa fetch ou Playwright conforme catálogo. Throttle 2s entre páginas.
+ */
+export async function scrapeCatalogSource(sourceId, maxPages, onProgress) {
+  const source = findSourceById(sourceId);
+  if (!source) throw new Error(`Fonte desconhecida: ${sourceId}`);
+
+  const pages = Math.max(1, Math.min(maxPages ?? source.pages, source.pages));
+  const allOffers = [];
+  const seen = new Set();
+  let consecutiveFails = 0;
+
+  for (let page = 1; page <= pages; page++) {
+    if (page > 1) await delay(1500, 3000);
+    const url = buildPageUrl(source, page);
+    try {
+      const offers = await scrapeUrl(url, source.method);
+      let added = 0;
+      for (const o of offers) {
+        if (seen.has(o.productId)) continue;
+        seen.add(o.productId);
+        allOffers.push(o);
+        added++;
+      }
+      consecutiveFails = 0;
+      if (onProgress) onProgress({ sourceId, page, totalPages: pages, found: offers.length, added });
+      // Página vazia = chegou no fim, aborta loop
+      if (offers.length === 0) {
+        if (onProgress) onProgress({ sourceId, page, stopped: 'empty-page' });
+        break;
+      }
+    } catch (e) {
+      consecutiveFails++;
+      if (onProgress) onProgress({ sourceId, page, error: e.message });
+      if (consecutiveFails >= 3) {
+        if (onProgress) onProgress({ sourceId, stopped: 'consecutive-fails' });
+        break;
+      }
+    }
+  }
+  return allOffers;
+}
 
 /**
  * Faz scraping de uma fonte (slug + maxPages).

@@ -73,6 +73,17 @@ export const api = {
   updateSource: (id, rowId, data) => request(`/api/workspaces/${id}/sources/${rowId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteSource: (id, rowId) => request(`/api/workspaces/${id}/sources/${rowId}`, { method: 'DELETE' }),
 
+  // Catálogo global de fontes (15 URLs validadas)
+  listCatalog: () => request('/api/workspaces/ml/catalog'),
+  sweepStatus: () => request('/api/workspaces/catalog/sweep/status'),
+  sweepStreamUrl: () => '/api/workspaces/catalog/sweep/stream',
+
+  // Fila de envio
+  queueStats: (id) => request(`/api/workspaces/${id}/queue/stats`),
+  queueUpcoming: (id) => request(`/api/workspaces/${id}/queue/upcoming`),
+  queueCancel: (id, queueId) => request(`/api/workspaces/${id}/queue/cancel/${queueId}`, { method: 'POST' }),
+  queueRefill: (id) => request(`/api/workspaces/${id}/queue/refill`, { method: 'POST' }),
+
   // Search com SSE - retorna URL pra EventSource
   searchStreamUrl: (id) => `/api/workspaces/${id}/search/stream`,
   resetOffers: (id, status = 'all') => request(`/api/workspaces/${id}/offers/reset?status=${status}`, { method: 'POST' }),

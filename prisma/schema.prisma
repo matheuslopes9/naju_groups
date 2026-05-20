@@ -38,6 +38,13 @@ model Workspace {
   autoApproveThreshold Int     @default(80) @map("auto_approve_threshold")
   autoApproveMaxDaily  Int     @default(10) @map("auto_approve_max_daily")
   autoApproveMinIntervalMin Int @default(6) @map("auto_approve_min_interval_min")
+  // Fontes ativadas (CSV de sourceIds do SOURCE_CATALOG). null = nenhuma do novo catálogo.
+  catalogSources       String? @map("catalog_sources")
+  // Janela de envio diário (formato "HH:MM-HH:MM", default 08:00-22:00)
+  sendWindowStart      String  @default("08:00") @map("send_window_start")
+  sendWindowEnd        String  @default("22:00") @map("send_window_end")
+  // Intervalo entre envios da fila (minutos)
+  queueIntervalMin     Int     @default(10) @map("queue_interval_min")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -45,8 +52,29 @@ model Workspace {
   groups          Group[]
   offers          Offer[]
   sources         WorkspaceSource[]
+  queuedSends     QueuedSend[]
 
   @@map("workspaces")
+}
+
+// Fila de envio: ofertas auto-aprovadas que aguardam o slot agendado.
+// Sender daemon checa a cada 30s e dispara quando scheduledFor <= now
+// E hora atual está dentro da janela do workspace.
+model QueuedSend {
+  id            String   @id @default(cuid())
+  workspaceId   String   @map("workspace_id")
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  offerId       String   @map("offer_id")
+  scheduledFor  DateTime @map("scheduled_for")
+  status        String   @default("queued") // queued | sending | sent | failed | cancelled
+  sentAt        DateTime? @map("sent_at")
+  error         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([workspaceId, offerId])
+  @@index([status, scheduledFor])
+  @@index([workspaceId, status, scheduledFor])
+  @@map("queued_sends")
 }
 
 // Fontes de scraping (URLs da página de ofertas que o bot vai varrer).

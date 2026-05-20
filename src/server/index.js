@@ -8,6 +8,8 @@ import { WebSocketServer } from 'ws';
 import { authMiddleware, validateSession, SESSION_COOKIE } from './auth.js';
 import { waManager } from './whatsapp/manager.js';
 import { startWorker } from './worker.js';
+import { startCatalogWorker } from './catalog-worker.js';
+import { startSender } from './sender.js';
 
 import authRouter from './routes/auth.js';
 import workspacesRouter from './routes/workspaces.js';
@@ -23,7 +25,7 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
-const BUILD_TAG = 'v1.1-copy-denso-2026-05-19';
+const BUILD_TAG = 'v1.2-catalog-queue-2026-05-20';
 
 // API pública
 app.get('/healthz', (_req, res) => res.json({ ok: true, build: BUILD_TAG }));
@@ -98,6 +100,8 @@ function parseCookies(header) {
   return out;
 }
 
-// Restaura sessões previamente conectadas e inicia worker
+// Restaura sessões previamente conectadas e inicia workers
 waManager.restoreAll().catch((e) => console.warn('restoreAll:', e.message));
 startWorker();
+startCatalogWorker();
+startSender();

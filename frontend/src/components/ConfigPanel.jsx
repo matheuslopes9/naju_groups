@@ -7,6 +7,8 @@ import { api } from '../api.js';
 import { toast } from '../toast.jsx';
 import WorkspaceForm from './WorkspaceForm.jsx';
 import NichePicker from './NichePicker.jsx';
+import CatalogPicker from './CatalogPicker.jsx';
+import QueuePanel from './QueuePanel.jsx';
 import { Icon } from './Icon.jsx';
 
 export default function ConfigPanel({ ws, reload }) {
@@ -185,7 +187,80 @@ export default function ConfigPanel({ ws, reload }) {
 
       {/* PASSO 5 - Agente IA / Auto-aprovação */}
       <AutoApproveSection ws={ws} reload={reload} />
+
+      {/* PASSO 6 - Catálogo global de fontes */}
+      <Section
+        number={6}
+        title="Catálogo global (varredura 6h)"
+        helper="15 fontes do ML — varredura completa a cada 6h alimenta a fila de envios. Marque só as relevantes pro seu nicho."
+        icon={Icon.Search}
+      >
+        <CatalogPicker ws={ws} reload={reload} />
+      </Section>
+
+      {/* PASSO 7 - Janela de envio + fila */}
+      <SendWindowSection ws={ws} reload={reload} />
+
+      <Section
+        number={8}
+        title="Fila de envios"
+        helper="Ofertas auto-aprovadas aguardando o slot de envio. Sender daemon dispara 1 a cada queueIntervalMin dentro da janela."
+        icon={Icon.Clock ?? Icon.RefreshCw}
+      >
+        <QueuePanel ws={ws} reload={reload} />
+      </Section>
     </div>
+  );
+}
+
+function SendWindowSection({ ws, reload }) {
+  const [start, setStart] = useState(ws.sendWindowStart ?? '08:00');
+  const [end, setEnd] = useState(ws.sendWindowEnd ?? '22:00');
+  const [intervalMin, setIntervalMin] = useState(ws.queueIntervalMin ?? 10);
+
+  async function save() {
+    try {
+      await api.updateWorkspace(ws.id, {
+        sendWindowStart: start,
+        sendWindowEnd: end,
+        queueIntervalMin: Number(intervalMin),
+      });
+      toast.success('Janela de envio salva');
+      reload();
+    } catch (e) { toast.error(e.message); }
+  }
+
+  // Calcula slots/dia
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  const windowMin = (eh * 60 + em) - (sh * 60 + sm);
+  const slots = Math.max(0, Math.floor(windowMin / intervalMin));
+
+  return (
+    <Section
+      number={7}
+      title="Janela de envio"
+      helper="Bot só dispara mensagens entre esses horários. Fora da janela, ofertas ficam na fila pro próximo dia."
+      icon={Icon.Clock ?? Icon.RefreshCw}
+    >
+      <div className="grid sm:grid-cols-3 gap-4">
+        <label className="block">
+          <span className="block text-sm font-medium mb-1.5">Início</span>
+          <input type="time" value={start} onChange={(e) => setStart(e.target.value)} onBlur={save} className="input" />
+        </label>
+        <label className="block">
+          <span className="block text-sm font-medium mb-1.5">Fim</span>
+          <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} onBlur={save} className="input" />
+        </label>
+        <label className="block">
+          <span className="block text-sm font-medium mb-1.5">Intervalo (min)</span>
+          <input type="number" min="3" max="120" value={intervalMin} onChange={(e) => setIntervalMin(Number(e.target.value))} onBlur={save} className="input" />
+        </label>
+      </div>
+      <p className="text-xs mt-3 opacity-70">
+        ~ <strong>{slots} envios/dia</strong> ({windowMin}min de janela ÷ {interval}min por envio).
+      </p>
+    </Section>
   );
 }
 

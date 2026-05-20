@@ -4,10 +4,12 @@ import { waManager } from '../whatsapp/manager.js';
 import { formatOffer } from '../formatter.js';
 import { runWorkspace } from '../worker.js';
 import { audit } from '../audit.js';
-import { fetchItemByUrl, AVAILABLE_SOURCES } from '../ml/scraper.js';
+import { fetchItemByUrl, AVAILABLE_SOURCES, listCatalogSources } from '../ml/scraper.js';
 import { attachAffiliateTag } from '../ml/affiliate.js';
 import { getAffiliateTag } from '../ml/oauth.js';
 import { NICHE_PRESETS, findNiche } from '../ml/niches.js';
+import { runCatalogSweep, getCatalogSweepStatus } from '../catalog-worker.js';
+import { getQueueStats, listUpcoming, enqueueApprovedOffers } from '../queue.js';
 
 const router = Router();
 
@@ -129,6 +131,7 @@ router.patch('/:id', async (req, res) => {
     'keywords', 'priceMin', 'priceMax', 'cooldownDays',
     'autoApproveEnabled', 'autoApproveThreshold', 'autoApproveMaxDaily',
     'autoApproveMinIntervalMin', 'nichePreset', 'audience', 'adStyle', 'typingSimulation',
+    'catalogSources', 'sendWindowStart', 'sendWindowEnd', 'queueIntervalMin',
   ];
   const data = {};
   for (const k of allowed) if (k in (req.body ?? {})) data[k] = req.body[k];
@@ -240,6 +243,31 @@ router.delete('/:id/groups/:groupId', async (req, res) => {
 // Lista as fontes disponíveis (validadas empiricamente)
 router.get('/ml/sources', async (_req, res) => {
   res.json(AVAILABLE_SOURCES);
+});
+
+// Catálogo NOVO (15 fontes) — pra UI escolher quais ativar
+router.get('/ml/catalog', async (_req, res) => {
+  res.json(listCatalogSources());
+});
+
+// Status da varredura do catálogo
+router.get('/catalog/sweep/status', async (_req, res) => {
+  res.json(getCatalogSweepStatus());
+});
+
+// Dispara varredura manual do catálogo (SSE: stream do progresso)
+router.get('/catalog/sweep/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+  const send = (evt) => res.write(`data: ${JSON.stringify(evt)}\n\n`);
+
+  runCatalogSweep((evt) => send(evt))
+    .then((r) => { send({ stage: 'finished', ...r }); res.end(); })
+    .catch((e) => { send({ stage: 'error', error: e.message }); res.end(); });
+
+  req.on('close', () => res.end());
 });
 
 // Lista os nichos pré-cadastrados pra dropdown no workspace
@@ -393,6 +421,48 @@ router.get('/:id/search/stream', async (req, res) => {
     send({ stage: 'fatal', error: e.message });
   }
   res.end();
+});
+
+// Fila de envio: estatísticas + próximos
+router.get('/:id/queue/stats', async (req, res) => {
+  const stats = await getQueueStats(req.params.id);
+  res.json(stats);
+});
+
+router.get('/:id/queue/upcoming', async (req, res) => {
+  const items = await listUpcoming(req.params.id, 50);
+  // anexa snapshot da oferta
+  const offerIds = items.map((i) => i.offerId);
+  const offers = await prisma.offer.findMany({ where: { id: { in: offerIds } } });
+  const offerMap = Object.fromEntries(offers.map((o) => [o.id, o]));
+  res.json(items.map((i) => ({
+    id: i.id,
+    offerId: i.offerId,
+    scheduledFor: i.scheduledFor,
+    status: i.status,
+    offer: offerMap[i.offerId] ? {
+      title: offerMap[i.offerId].title,
+      imageUrl: offerMap[i.offerId].imageUrl,
+      price: offerMap[i.offerId].price,
+      discountPercent: offerMap[i.offerId].discountPercent,
+      score: offerMap[i.offerId].score,
+    } : null,
+  })));
+});
+
+router.post('/:id/queue/cancel/:queueId', async (req, res) => {
+  await prisma.queuedSend.update({
+    where: { id: req.params.queueId },
+    data: { status: 'cancelled' },
+  });
+  res.json({ ok: true });
+});
+
+router.post('/:id/queue/refill', async (req, res) => {
+  const ws = await prisma.workspace.findUnique({ where: { id: req.params.id } });
+  if (!ws) return res.status(404).json({ error: 'workspace não existe' });
+  const r = await enqueueApprovedOffers(ws, 100);
+  res.json(r);
 });
 
 // Ofertas (inbox)
