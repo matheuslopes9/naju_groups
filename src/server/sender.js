@@ -12,6 +12,7 @@
 import { prisma } from './db.js';
 import { waManager } from './whatsapp/manager.js';
 import { generateShortlink, getSessionStatus } from './ml/affiliate-browser.js';
+import { validateOffer } from './ml/validator.js';
 import { formatOffer } from './formatter.js';
 import { isWithinSendWindow } from './queue.js';
 import { createLogger } from './logger.js';
@@ -118,6 +119,37 @@ async function processOne(ws, queueItem) {
         where: { id: queueItem.id },
         data: { status: 'sent', sentAt: new Date() },
       });
+      return;
+    }
+
+    // VALIDAÇÃO PRÉ-ENVIO: confere se oferta ainda está válida
+    // (página existe, preço não subiu além de 5%, promoção ainda ativa).
+    // Fail-safe: erro na validação assume válida (não bloqueia envio por
+    // problemas de rede/ML lento).
+    const validation = await validateOffer(offer);
+    if (!validation.valid) {
+      log.info('oferta expirada, pulando envio', {
+        ws: ws.name,
+        productId: offer.productId,
+        reason: validation.reason,
+        currentPrice: validation.currentPrice,
+        recordedPrice: offer.price,
+      });
+      // Marca offer como expired + cancela este envio. Próximo item da fila
+      // será pego no próximo tick.
+      await prisma.$transaction([
+        prisma.offer.update({
+          where: { id: offer.id },
+          data: { status: 'expired' },
+        }),
+        prisma.queuedSend.update({
+          where: { id: queueItem.id },
+          data: {
+            status: 'cancelled',
+            error: `expired:${validation.reason}`,
+          },
+        }),
+      ]).catch(() => {});
       return;
     }
 

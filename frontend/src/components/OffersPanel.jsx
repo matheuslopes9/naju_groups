@@ -5,9 +5,10 @@ import { Icon } from './Icon.jsx';
 import SweepStatusBadge from './SweepStatusBadge.jsx';
 
 const TABS = [
-  { id: 'pending',  label: 'Pendentes', icon: Icon.Sparkles },
-  { id: 'sent',     label: 'Enviadas',  icon: Icon.Check },
+  { id: 'pending',  label: 'Pendentes',  icon: Icon.Sparkles },
+  { id: 'sent',     label: 'Enviadas',   icon: Icon.Check },
   { id: 'rejected', label: 'Rejeitadas', icon: Icon.X },
+  { id: 'expired',  label: 'Expiradas',  icon: Icon.Clock ?? Icon.RefreshCw },
 ];
 
 const PAGE_SIZE = 20;
@@ -156,7 +157,12 @@ export default function OffersPanel({ ws }) {
         <div className="card text-center py-12">
           <Icon.Sparkles width={36} height={36} className="mx-auto mb-3 text-gradient" />
           <p style={{ color: 'rgb(var(--text-muted))' }}>
-            Nenhuma oferta {tab === 'pending' ? 'pendente' : tab === 'sent' ? 'enviada' : 'rejeitada'}.
+            Nenhuma oferta {
+              tab === 'pending' ? 'pendente'
+              : tab === 'sent' ? 'enviada'
+              : tab === 'expired' ? 'expirada'
+              : 'rejeitada'
+            }.
           </p>
           {tab === 'pending' && (
             <p className="text-xs mt-3 opacity-60">
@@ -453,6 +459,11 @@ function OfferCard({ offer, tab, affSessionConnected, onApprove, onReject, onSet
           {tab === 'rejected' && (
             <div className="text-xs" style={{ color: 'rgb(var(--text-muted))' }}>
               Rejeitada {new Date(offer.createdAt).toLocaleString('pt-BR')}
+            </div>
+          )}
+          {tab === 'expired' && (
+            <div className="text-xs" style={{ color: 'rgb(var(--text-muted))' }}>
+              ⏰ Expirou na validação pré-envio
             </div>
           )}
         </div>
