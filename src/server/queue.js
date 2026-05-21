@@ -18,6 +18,13 @@
  */
 import { prisma } from './db.js';
 
+// Janela de envio é interpretada em horário de Brasília (UTC-3 fixo).
+// Servidor (EasyPanel/Docker) roda em UTC, então NÃO podemos usar
+// date.getHours()/setHours() — esses retornam hora local do servidor (UTC),
+// causando defasagem de 3h: "08:00 - 22:00" virava "05:00 BRT - 19:00 BRT".
+// BR não tem mais DST desde 2019, então offset é fixo.
+const BRT_OFFSET_MIN = -180; // Brasília = UTC - 3h
+
 /**
  * Parse "HH:MM" → minutos do dia (0–1439).
  */
@@ -28,13 +35,45 @@ function parseTimeOfDay(hhmm) {
 }
 
 /**
- * Retorna true se a data fornecida cai dentro da janela [start, end] do workspace
- * em horário local do servidor (assumimos America/Sao_Paulo pelo deploy).
+ * Retorna minutos-do-dia (0-1439) em horário de Brasília pra um Date UTC.
+ */
+function minutesOfDayBRT(date) {
+  // Pega UTC time → subtrai 3h → resto da divisão por 24h vira minutos do dia BRT
+  const utcMin = date.getUTCHours() * 60 + date.getUTCMinutes();
+  // Adiciona offset (negativo) e normaliza pra 0-1439
+  return ((utcMin + BRT_OFFSET_MIN) % 1440 + 1440) % 1440;
+}
+
+/**
+ * Constrói um Date UTC representando uma hora-do-dia em BRT.
+ * fromDate define o "dia base" (em BRT). Se a hora cair no dia anterior/seguinte
+ * em UTC, o resultado já reflete isso corretamente.
+ *
+ * Ex: 08:00 BRT no dia 20/05 → 2026-05-20T11:00:00.000Z
+ */
+function brtTimeOnDate(fromDate, minutesOfDayBrt) {
+  // Pega o "dia BRT" atual (data corrente em BRT)
+  const brt = new Date(fromDate.getTime() + BRT_OFFSET_MIN * 60_000);
+  // Cria Date em BRT com hh:mm desejado
+  const result = new Date(Date.UTC(
+    brt.getUTCFullYear(),
+    brt.getUTCMonth(),
+    brt.getUTCDate(),
+    Math.floor(minutesOfDayBrt / 60),
+    minutesOfDayBrt % 60,
+    0, 0,
+  ));
+  // Mas isso ficou em UTC tratando os hh:mm como UTC. Pra virar BRT, ADICIONO 3h
+  return new Date(result.getTime() - BRT_OFFSET_MIN * 60_000);
+}
+
+/**
+ * Retorna true se a data fornecida cai dentro da janela [start, end] em BRT.
  */
 export function isWithinSendWindow(ws, date = new Date()) {
   const start = parseTimeOfDay(ws.sendWindowStart) ?? 8 * 60;
   const end = parseTimeOfDay(ws.sendWindowEnd) ?? 22 * 60;
-  const mins = date.getHours() * 60 + date.getMinutes();
+  const mins = minutesOfDayBRT(date);
   return mins >= start && mins < end;
 }
 
@@ -60,19 +99,7 @@ export async function computeNextSlot(ws, fromDate = new Date()) {
     last ? last.scheduledFor.getTime() + intervalMs : 0,
   ));
 
-  // Ajusta pra dentro da janela
-  for (let i = 0; i < 3; i++) {
-    const mins = candidate.getHours() * 60 + candidate.getMinutes();
-    if (mins >= start && mins < end) return candidate;
-    if (mins < start) {
-      candidate.setHours(Math.floor(start / 60), start % 60, 0, 0);
-      return candidate;
-    }
-    // mins >= end → próximo dia
-    candidate = new Date(candidate.getTime() + 24 * 60 * 60 * 1000);
-    candidate.setHours(Math.floor(start / 60), start % 60, 0, 0);
-  }
-  return candidate;
+  return clampToWindow(candidate, start, end);
 }
 
 /**
@@ -262,23 +289,20 @@ export async function rescheduleQueue(ws) {
 }
 
 /**
- * Ajusta uma data pra cair dentro da janela [start, end] em minutos do dia.
- * Se já está, retorna. Se está antes, empurra pro início. Se está depois,
- * empurra pro início do próximo dia.
+ * Ajusta uma data pra cair dentro da janela [start, end] de minutos-do-dia BRT.
+ * Se já está dentro, retorna. Se está antes, empurra pro início (BRT). Se está
+ * depois, empurra pro início do próximo dia (BRT).
  */
 function clampToWindow(date, startMin, endMin) {
   for (let i = 0; i < 3; i++) {
-    const mins = date.getHours() * 60 + date.getMinutes();
+    const mins = minutesOfDayBRT(date);
     if (mins >= startMin && mins < endMin) return date;
     if (mins < startMin) {
-      const out = new Date(date);
-      out.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
-      return out;
+      // Mesmo dia BRT, hora = start
+      return brtTimeOnDate(date, startMin);
     }
-    // mins >= endMin → próximo dia
-    const out = new Date(date.getTime() + 24 * 60 * 60 * 1000);
-    out.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
-    date = out;
+    // mins >= endMin → dia seguinte BRT, hora = start
+    date = brtTimeOnDate(new Date(date.getTime() + 24 * 60 * 60 * 1000), startMin);
   }
   return date;
 }

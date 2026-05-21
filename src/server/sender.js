@@ -18,12 +18,29 @@ import { createLogger } from './logger.js';
 
 const log = createLogger('sender');
 const TICK_MS = 30_000;
-const wsCooldown = new Map(); // workspaceId → timestamp until
+const wsCooldown = new Map(); // workspaceId → timestamp until (cooldown após falhas)
 
 export function startSender() {
   setInterval(() => tick().catch((e) => log.warn('tick falhou', { error: e.message })), TICK_MS);
   setTimeout(tick, 10_000);
   log.info('sender daemon iniciado', { tickMs: TICK_MS });
+}
+
+/**
+ * Retorna timestamp do último envio bem-sucedido pra um workspace.
+ * Usado pra respeitar queueIntervalMin entre envios consecutivos.
+ *
+ * Quando a fila tem itens atrasados (scheduledFor no passado), sem este
+ * throttle o sender dispararia 1 a cada tick (30s), ignorando o intervalMin.
+ * Sintoma: madrugada com fila vencida → 1 envio/minuto até esgotar.
+ */
+async function lastSentAt(workspaceId) {
+  const row = await prisma.queuedSend.findFirst({
+    where: { workspaceId, status: 'sent' },
+    orderBy: { sentAt: 'desc' },
+    select: { sentAt: true },
+  });
+  return row?.sentAt ?? null;
 }
 
 async function tick() {
@@ -54,7 +71,25 @@ async function tick() {
     if (!ws) continue;
     if (!isWithinSendWindow(ws)) continue;
 
-    // Processa 1 item por workspace por tick (respeita o intervalMin natural)
+    // Throttle: respeita queueIntervalMin entre envios.
+    // Se o último 'sent' foi há menos que o intervalo configurado, espera.
+    const intervalMs = (ws.queueIntervalMin ?? 5) * 60_000;
+    const last = await lastSentAt(workspaceId);
+    if (last) {
+      const elapsed = Date.now() - last.getTime();
+      if (elapsed < intervalMs) {
+        // Ainda não passou o intervalo — pula esse workspace neste tick.
+        // Pode aparecer no log debug se LOG_LEVEL=debug.
+        log.debug('throttle: aguardando intervalo', {
+          ws: ws.name,
+          waitMs: intervalMs - elapsed,
+          intervalMin: ws.queueIntervalMin,
+        });
+        continue;
+      }
+    }
+
+    // Processa 1 item por workspace por tick
     const item = items[0];
     await processOne(ws, item);
   }
