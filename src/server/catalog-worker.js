@@ -114,31 +114,51 @@ function previousSlot(now = new Date()) {
   ));
 }
 
+/**
+ * Scheduler robusto: setInterval em vez de chain de setTimeout.
+ *
+ * MOTIVO: chain de setTimeout que se re-agenda no final tem ponto único de
+ * falha. Se a callback lançar exception não capturada OU travar em await,
+ * scheduleNextSlot() nunca chama, fila para pra sempre. Foi o que aconteceu
+ * em prod (19 dias parado após bug P2002).
+ *
+ * setInterval continua disparando mesmo que tick anterior falhe. lastSweepAt
+ * controla idempotência (não dispara 2× pro mesmo slot).
+ *
+ * Tick: 1 minuto. Verifica se slot atual já passou e ainda não foi varrido.
+ */
 export function startCatalogWorker() {
-  scheduleNextSlot();
-  // Catch-up: se subiu e o último slot ainda não rolou, varre logo
-  setTimeout(() => {
-    const prev = previousSlot();
-    if (lastSweepAt < prev.getTime()) {
-      log.info('catch-up disparando varredura', { lastSlot: prev.toISOString() });
-      runCatalogSweep().catch((e) => logError('sweep', 'catch-up falhou', e));
-    }
-  }, 60_000);
+  // Catch-up imediato 60s após boot
+  setTimeout(() => checkAndRunSweep('catch-up'), 60_000);
+
+  // Heartbeat a cada 1 min checa se chegou o slot
+  setInterval(() => checkAndRunSweep('scheduled'), 60_000);
+
   log.info('catalog worker iniciado · slots fixos 00h/06h/12h/18h (BRT)');
 }
 
-function scheduleNextSlot() {
-  const next = nextSlotAfter();
-  const delay = Math.max(1000, next.getTime() - Date.now());
-  log.info('próxima varredura agendada', { at: next.toISOString(), inMin: Math.round(delay / 60000) });
-  setTimeout(async () => {
-    try {
-      await runCatalogSweep();
-    } catch (e) {
-      logError('sweep', 'varredura falhou', e);
-    }
-    scheduleNextSlot(); // reagenda pro próximo
-  }, delay);
+/**
+ * Checa se devemos varrer agora:
+ *  - Tem slot anterior cujo timestamp > lastSweepAt? Sim → dispara
+ *  - Já tem varredura em andamento? Não, evita concorrência
+ */
+function checkAndRunSweep(reason) {
+  try {
+    if (sweepInFlight) return;
+    const prev = previousSlot();
+    if (lastSweepAt >= prev.getTime()) return; // já rodou esse slot
+
+    const next = nextSlotAfter();
+    log.info('disparando varredura', {
+      reason,
+      prevSlot: prev.toISOString(),
+      nextSlot: next.toISOString(),
+    });
+    runCatalogSweep().catch((e) => logError('sweep', 'varredura falhou', e));
+  } catch (e) {
+    // Nunca deixa exception escapar daqui — interval continua rodando
+    logError('sweep', 'check falhou', e);
+  }
 }
 
 /**

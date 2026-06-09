@@ -7,11 +7,22 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { authMiddleware, validateSession, SESSION_COOKIE } from './auth.js';
 import { waManager } from './whatsapp/manager.js';
-import { startCatalogWorker } from './catalog-worker.js';
+import { startCatalogWorker, getCatalogSweepStatus } from './catalog-worker.js';
 import { startSender } from './sender.js';
-import { createLogger } from './logger.js';
+import { createLogger, logError } from './logger.js';
 
 const log = createLogger('app');
+
+// Handlers globais de erro: protege contra crash silencioso ou processo
+// travado por uma rejection assíncrona não capturada (foi o que travou o
+// sistema por 19 dias em maio/26 — bug P2002 causava promise rejections
+// que escapavam pro process).
+process.on('unhandledRejection', (reason, promise) => {
+  logError('app', 'unhandledRejection (capturado, sistema continua)', reason);
+});
+process.on('uncaughtException', (err) => {
+  logError('app', 'uncaughtException (capturado, sistema continua)', err);
+});
 
 import authRouter from './routes/auth.js';
 import workspacesRouter from './routes/workspaces.js';
@@ -28,10 +39,35 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
-const BUILD_TAG = 'v3.5-sender-preflight-2026-06-09';
+const BUILD_TAG = 'v3.6-resilience-2026-06-09';
 
 // API pública
-app.get('/healthz', (_req, res) => res.json({ ok: true, build: BUILD_TAG }));
+// /healthz reporta status REAL — usado por EasyPanel/Docker HEALTHCHECK pra
+// detectar processo travado (event loop bloqueado, scheduler quebrado, etc).
+// Retorna 503 se varredura não rola há mais de 12h — Docker reinicia o container.
+const STALE_SWEEP_MS = 12 * 60 * 60 * 1000; // 12h
+
+app.get('/healthz', (_req, res) => {
+  const status = getCatalogSweepStatus();
+  const lastSweep = status.lastSweepAt ? new Date(status.lastSweepAt).getTime() : 0;
+  const sinceLastSweep = lastSweep ? Date.now() - lastSweep : null;
+  const stale = lastSweep > 0 && sinceLastSweep > STALE_SWEEP_MS;
+
+  // "fresh start" (servidor acabou de subir, sem varredura ainda) é considerado
+  // healthy — catch-up vai disparar em até 60s
+  const healthy = !lastSweep || !stale;
+
+  const body = {
+    ok: healthy,
+    build: BUILD_TAG,
+    lastSweepAt: status.lastSweepAt,
+    nextSweepAt: status.nextSweepAt,
+    inFlight: status.inFlight,
+    sinceLastSweepMin: sinceLastSweep ? Math.round(sinceLastSweep / 60000) : null,
+    stale,
+  };
+  res.status(healthy ? 200 : 503).json(body);
+});
 app.get('/version', (_req, res) => res.json({ build: BUILD_TAG }));
 app.use('/api/auth', authRouter);
 
