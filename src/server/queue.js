@@ -181,9 +181,12 @@ function weightedShuffle(items) {
 export async function enqueueApprovedOffers(ws, maxToQueue = 500) {
   if (!ws.autoApproveEnabled) return { enqueued: 0 };
 
-  // Ofertas pending com score alto que ainda não estão na fila
+  // Pega TODOS os QueuedSend existentes pra evitar P2002 no create.
+  // Unique constraint é (workspaceId, offerId) sem filtrar por status —
+  // então mesmo registros 'sent', 'cancelled', 'failed' ocupam o slot.
+  // Filtrando antes evita dispar prisma:error no log.
   const existing = await prisma.queuedSend.findMany({
-    where: { workspaceId: ws.id, status: { in: ['queued', 'sending'] } },
+    where: { workspaceId: ws.id },
     select: { offerId: true },
   });
   const inQueue = new Set(existing.map((q) => q.offerId));
@@ -230,23 +233,22 @@ export async function enqueueApprovedOffers(ws, maxToQueue = 500) {
     }
   }
 
+  // ordered já foi filtrado por !inQueue acima → create não dá conflito.
+  // Cada item precisa de scheduledFor único calculado em sequência (round-robin
+  // de slots), por isso loop em vez de createMany.
   let enqueued = 0;
   for (const offer of ordered) {
     if (enqueued >= maxToQueue) break;
     const slot = await computeNextSlot(ws);
-    try {
-      await prisma.queuedSend.create({
-        data: {
-          workspaceId: ws.id,
-          offerId: offer.id,
-          scheduledFor: slot,
-          status: 'queued',
-        },
-      });
-      enqueued++;
-    } catch {
-      // unique constraint (workspaceId+offerId) — já enfileirado
-    }
+    await prisma.queuedSend.create({
+      data: {
+        workspaceId: ws.id,
+        offerId: offer.id,
+        scheduledFor: slot,
+        status: 'queued',
+      },
+    });
+    enqueued++;
   }
   return { enqueued };
 }

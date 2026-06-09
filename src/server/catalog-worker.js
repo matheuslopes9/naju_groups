@@ -274,40 +274,42 @@ export async function distributeToWorkspace(ws, opts = {}) {
   const recentSet = new Set(recent.map((r) => r.productId));
   stats.skippedByCooldown = recentSet.size;
 
+  // Batch insert com skipDuplicates: o banco ignora conflitos de unique
+  // (workspaceId+productId) sem disparar exception P2002. Diferente de
+  // create+try/catch que dispara prisma:error pra cada um, poluindo log.
+  const toInsert = passed
+    .filter((o) => !recentSet.has(o.productId))
+    .map((o) => ({
+      workspaceId: ws.id,
+      productId: o.productId,
+      title: o.title,
+      price: o.price,
+      originalPrice: o.originalPrice,
+      discountPercent: o.discountPercent,
+      currency: o.currency ?? 'BRL',
+      permalink: o.permalink,
+      affiliateUrl: attachAffiliateTag(o.permalink, affTag),
+      imageUrl: o.image ?? '',
+      freeShipping: !!o.freeShipping,
+      soldQuantity: o.soldQuantity ?? 0,
+      coupon: o.coupon,
+      highlight: o.highlight,
+      categoryDetected: o.categoryDetected,
+      commissionPct: o.commissionPct,
+      estimatedCommission: o.estimatedCommission,
+      score: o.score,
+      status: 'pending',
+    }));
+
   let saved = 0;
-  for (const o of passed) {
-    if (recentSet.has(o.productId)) continue;
-    // o.score já vem calculado de applyWorkspaceFilters (única source of truth)
-    const affiliateUrl = attachAffiliateTag(o.permalink, affTag);
-    try {
-      await prisma.offer.create({
-        data: {
-          workspaceId: ws.id,
-          productId: o.productId,
-          title: o.title,
-          price: o.price,
-          originalPrice: o.originalPrice,
-          discountPercent: o.discountPercent,
-          currency: o.currency ?? 'BRL',
-          permalink: o.permalink,
-          affiliateUrl,
-          imageUrl: o.image ?? '',
-          freeShipping: !!o.freeShipping,
-          soldQuantity: o.soldQuantity ?? 0,
-          coupon: o.coupon,
-          highlight: o.highlight,
-          categoryDetected: o.categoryDetected,
-          commissionPct: o.commissionPct,
-          estimatedCommission: o.estimatedCommission,
-          score: o.score,
-          status: 'pending',
-        },
-      });
-      saved++;
-    } catch {
-      // dup (workspaceId+productId) — pode acontecer em concorrência ou reprocessamento
-    }
+  if (toInsert.length > 0) {
+    const result = await prisma.offer.createMany({
+      data: toInsert,
+      skipDuplicates: true,
+    });
+    saved = result.count;
   }
+
   stats.saved = saved;
   return stats;
 }
