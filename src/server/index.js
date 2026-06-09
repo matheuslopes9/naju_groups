@@ -28,7 +28,7 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
-const BUILD_TAG = 'v3.4-prisma-p2002-2026-06-09';
+const BUILD_TAG = 'v3.5-sender-preflight-2026-06-09';
 
 // API pública
 app.get('/healthz', (_req, res) => res.json({ ok: true, build: BUILD_TAG }));

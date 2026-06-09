@@ -17,6 +17,15 @@ import { formatOffer } from './formatter.js';
 import { isWithinSendWindow } from './queue.js';
 import { createLogger } from './logger.js';
 
+// Erros temporarios (WA caido, sem grupos): retry no proximo tick
+// em vez de marcar 'failed' (que e' definitivo e perde a oferta).
+class RetryableError extends Error {
+  constructor(message, retryAfterMs = 5 * 60_000) {
+    super(message);
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
 const log = createLogger('sender');
 const TICK_MS = 30_000;
 const wsCooldown = new Map(); // workspaceId → timestamp until (cooldown após falhas)
@@ -122,6 +131,30 @@ async function processOne(ws, queueItem) {
       return;
     }
 
+    // PRÉ-CHECKS rápidos antes de gastar Playwright/shortlink:
+    // 1) WhatsApp conectado? Se não, retry no próximo tick (sem queimar shortlink)
+    const waStatus = waManager.getStatusSync(ws.id);
+    if (waStatus.status !== 'connected') {
+      throw new RetryableError(`WhatsApp ${waStatus.status} (aguardando reconexão)`, 5 * 60_000);
+    }
+
+    // 2) Tem grupo staging? Sem grupo, não tem o que enviar
+    const groups = await prisma.group.findMany({
+      where: { workspaceId: ws.id, type: 'staging', enabled: true },
+    });
+    if (groups.length === 0) {
+      await markFailed(queueItem.id, 'Nenhum grupo staging cadastrado');
+      return;
+    }
+
+    // 3) Sessão afiliado conectada? (precisa pra gerar shortlink)
+    if (!offer.shortlink) {
+      const session = await getSessionStatus();
+      if (session.status !== 'connected') {
+        throw new RetryableError(`Sessão afiliado ${session.status}`, 10 * 60_000);
+      }
+    }
+
     // VALIDAÇÃO PRÉ-ENVIO: confere se oferta ainda está válida
     // (página existe, preço não subiu além de 5%, promoção ainda ativa).
     // Fail-safe: erro na validação assume válida (não bloqueia envio por
@@ -153,28 +186,14 @@ async function processOne(ws, queueItem) {
       return;
     }
 
-    // Garante shortlink
+    // Garante shortlink (só agora — já confirmamos que dá pra enviar)
     let shortlink = offer.shortlink;
     if (!shortlink) {
-      const session = await getSessionStatus();
-      if (session.status !== 'connected') {
-        await markFailed(queueItem.id, `Sessão afiliado: ${session.status}`);
-        bumpCooldown(ws.id);
-        return;
-      }
       shortlink = await generateShortlink(offer.permalink);
       await prisma.offer.update({
         where: { id: offer.id },
         data: { shortlink, shortlinkAddedAt: new Date() },
       });
-    }
-
-    const groups = await prisma.group.findMany({
-      where: { workspaceId: ws.id, type: 'staging', enabled: true },
-    });
-    if (groups.length === 0) {
-      await markFailed(queueItem.id, 'Nenhum grupo staging cadastrado');
-      return;
     }
 
     const text = formatOffer({
@@ -228,6 +247,15 @@ async function processOne(ws, queueItem) {
 
     log.info('enviado', { ws: ws.name, title: offer.title.slice(0, 60), score: offer.score });
   } catch (e) {
+    if (e instanceof RetryableError) {
+      // Erro temporário: devolve item pra fila pra próximo tick (com pequeno delay)
+      await markRetry(queueItem.id, e.message, e.retryAfterMs);
+      // Cooldown leve do workspace pra evitar martelar quando o problema é
+      // sistêmico (ex: WA caído pra todos os itens)
+      wsCooldown.set(ws.id, Date.now() + Math.min(e.retryAfterMs, 5 * 60_000));
+      log.info('retry agendado', { ws: ws.name, reason: e.message, retryInMin: Math.round(e.retryAfterMs / 60_000) });
+      return;
+    }
     log.warn('envio falhou', { ws: ws.name, error: e.message });
     await markFailed(queueItem.id, e.message);
     bumpCooldown(ws.id);
@@ -238,6 +266,24 @@ async function markFailed(queueId, error) {
   await prisma.queuedSend.update({
     where: { id: queueId },
     data: { status: 'failed', error: String(error).slice(0, 500) },
+  }).catch(() => {});
+}
+
+/**
+ * Devolve item pra fila pra próximo tick. Move scheduledFor pra now + delayMs
+ * e marca status='queued' de novo. Diferente de markFailed (que é definitivo).
+ *
+ * Usado pra erros transitórios: WA caído, sessão afiliado expirada, etc.
+ * Quando o usuário reconecta, o item dispara automaticamente.
+ */
+async function markRetry(queueId, reason, delayMs) {
+  await prisma.queuedSend.update({
+    where: { id: queueId },
+    data: {
+      status: 'queued',
+      scheduledFor: new Date(Date.now() + delayMs),
+      error: `retry: ${String(reason).slice(0, 200)}`,
+    },
   }).catch(() => {});
 }
 
